@@ -285,14 +285,15 @@ export const loadInventoryCatalog = async ({ limit = 100 } = {}) => {
   };
 };
 
-export const loginStaff = async ({ email, password }) => {
+export const loginStaff = async ({ identifier, email, password }) => {
+  const loginIdentifier = String(identifier || email || '').trim();
   const response = await fetch(`${getApiBaseUrl()}/auth/login`, {
     method: 'POST',
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ identifier: loginIdentifier, email: loginIdentifier, password }),
   });
 
   if (!response.ok) {

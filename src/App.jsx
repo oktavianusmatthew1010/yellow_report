@@ -763,8 +763,8 @@ function LoadingState() {
 
 function LoginView({ onLoginSuccess }) {
   const navigate = useNavigate();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [identifier, setIdentifier] = useState('admin@yellocarwash.com');
+  const [password, setPassword] = useState('password123');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -774,7 +774,7 @@ function LoginView({ onLoginSuccess }) {
     setError('');
 
     try {
-      const result = await loginStaff({ email, password });
+      const result = await loginStaff({ identifier, password });
       const nextStaff = result.staff || null;
 
       window.localStorage.setItem(AUTH_STORAGE_KEYS.token, result.token);
@@ -832,13 +832,13 @@ function LoginView({ onLoginSuccess }) {
 
         <form className="login-form" onSubmit={handleSubmit}>
           <label className="login-field">
-            <span>Email</span>
+            <span>Email / Staff No / Phone / Name</span>
             <input
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="operator@yellowcarwash.com"
-              autoComplete="email"
+              type="text"
+              value={identifier}
+              onChange={(event) => setIdentifier(event.target.value)}
+              placeholder="admin@yellocarwash.com"
+              autoComplete="username"
               required
             />
           </label>
@@ -4026,7 +4026,7 @@ function DashboardContent({ session, onLogout }) {
   const handlePickChatPrompt = (prompt) => {
     setChatInput(prompt);
   };
-  const operatorName = session?.staff?.name || session?.staff?.fullName || session?.staff?.email || 'OPERATOR_UNIT_72';
+  const operatorName = session?.staff?.name || session?.staff?.staffname || session?.staff?.fullName || session?.staff?.email || 'OPERATOR_UNIT_72';
   const topRightStatus = lastUpdated
     ? `ONLINE • ${lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
     : 'ONLINE';
