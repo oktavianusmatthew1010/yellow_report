@@ -15,8 +15,21 @@ import {
   generateAiInsight,
   loadExecutiveDashboard,
   loadInventoryCatalog,
-  loginStaff,
 } from './api';
+
+const DEFAULT_LOGIN = {
+  identifier: 'admin@yellocarwash.com',
+  password: 'password123',
+  token: 'local-admin-session',
+  staff: {
+    id: 'admin',
+    staffid: 1,
+    staffname: 'Admin',
+    name: 'Admin',
+    role: 'admin',
+    loginMode: 'local_hardcoded',
+  },
+};
 
 const NAV_ITEMS = [
   { label: 'Dashboard', icon: 'grid', path: '/summary' },
@@ -763,8 +776,8 @@ function LoadingState() {
 
 function LoginView({ onLoginSuccess }) {
   const navigate = useNavigate();
-  const [identifier, setIdentifier] = useState('admin@yellocarwash.com');
-  const [password, setPassword] = useState('password123');
+  const [identifier, setIdentifier] = useState(DEFAULT_LOGIN.identifier);
+  const [password, setPassword] = useState(DEFAULT_LOGIN.password);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -774,12 +787,18 @@ function LoginView({ onLoginSuccess }) {
     setError('');
 
     try {
-      const result = await loginStaff({ identifier, password });
-      const nextStaff = result.staff || null;
+      const isValidLogin =
+        String(identifier || '').trim().toLowerCase() === DEFAULT_LOGIN.identifier &&
+        String(password || '') === DEFAULT_LOGIN.password;
 
-      window.localStorage.setItem(AUTH_STORAGE_KEYS.token, result.token);
+      if (!isValidLogin) {
+        throw new Error('Invalid login. Use the default admin credentials.');
+      }
+
+      const nextStaff = DEFAULT_LOGIN.staff;
+      window.localStorage.setItem(AUTH_STORAGE_KEYS.token, DEFAULT_LOGIN.token);
       window.localStorage.setItem(AUTH_STORAGE_KEYS.staff, JSON.stringify(nextStaff));
-      onLoginSuccess({ token: result.token, staff: nextStaff });
+      onLoginSuccess({ token: DEFAULT_LOGIN.token, staff: nextStaff });
       navigate('/summary', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
@@ -800,11 +819,11 @@ function LoginView({ onLoginSuccess }) {
         </div>
 
         <div className="login-copy">
-          <div className="login-kicker mono">SYNCED TO LIVE API</div>
-          <h1>Access the home dashboard and monitor every wash operation in real time.</h1>
+          <div className="login-kicker mono">LOCAL ADMIN SIGN-IN</div>
+          <h1>Access the home dashboard with the default admin credentials.</h1>
           <p>
-            Sign in to unlock the executive summary, analytics, and AI assistant connected to the live
-            backend at <span className="mono">oxientsoft.my.id/api/v1</span>.
+            This login skips the auth request and uses the built-in admin account:
+            <span className="mono"> admin@yellocarwash.com / password123</span>.
           </p>
         </div>
 
