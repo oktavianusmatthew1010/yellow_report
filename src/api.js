@@ -527,6 +527,48 @@ export const fetchTransactionHistory = async ({ startDate, endDate, pageSize = 1
   return fetchPagedTransactions({ startDate, endDate, pageSize, storeId, search });
 };
 
+export const fetchCompliments = async ({
+  search = '',
+  status = 'active',
+  page = 1,
+  limit = 12,
+  sortBy = 'eligibilityScore',
+  sortOrder = 'desc',
+} = {}) => {
+  const query = new URLSearchParams({
+    page: String(page),
+    limit: String(limit),
+    status,
+    sortBy,
+    sortOrder,
+  });
+
+  if (search && String(search).trim()) {
+    query.set('search', String(search).trim());
+  }
+
+  return requestJson(`/customers/compliments?${query.toString()}`);
+};
+
+export const createComplimentVoucher = async ({
+  rewardText = 'COMPLIMENTARY WASH',
+  discountValue = 100,
+  discountType = 'percent',
+  status = 'active',
+  expiresInDays = 30,
+} = {}) => {
+  return requestJson('/customers/compliments', {
+    method: 'POST',
+    body: {
+      rewardText,
+      discountValue,
+      discountType,
+      status,
+      expiresInDays,
+    },
+  });
+};
+
 const hourBuckets = [
   { label: '08:00', hour: 8 },
   { label: '10:00', hour: 10 },

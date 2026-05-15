@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import JsBarcode from 'jsbarcode';
 import {
   BrowserRouter,
   NavLink,
@@ -11,6 +12,8 @@ import {
 } from 'react-router-dom';
 import {
   fetchTransactionHistory,
+  fetchCompliments,
+  createComplimentVoucher,
   generateAiChat,
   generateAiInsight,
   loadExecutiveDashboard,
@@ -37,8 +40,16 @@ const NAV_ITEMS = [
   { label: 'Inventory', icon: 'inventory', path: '/inventory' },
   { label: 'Attendance', icon: 'attendance', path: '/attendance' },
   { label: 'Timetable', icon: 'calendar', path: '/timetable' },
+  { label: 'Compliments', icon: 'coupon', path: '/compliments' },
   { label: 'Analytics', icon: 'chart', path: '/analytics' },
   { label: 'AI Assistant', icon: 'bot', path: '/ai-assistant' },
+];
+
+const MOBILE_NAV_ITEMS = [
+  { label: 'Home', icon: 'grid', path: '/summary' },
+  { label: 'Compliments', icon: 'coupon', path: '/compliments' },
+  { label: 'Stats', icon: 'chart', path: '/analytics' },
+  { label: 'Chat', icon: 'bot', path: '/ai-assistant' },
 ];
 
 const BRANCH_RANKINGS = [
@@ -408,6 +419,19 @@ const formatMemberDateTime = (value) => {
     day: '2-digit',
     year: 'numeric',
   })} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+};
+
+const sanitizeCode39Value = (value) => String(value || '')
+  .toUpperCase()
+  .replace(/[^A-Z0-9\-\.\$\/\+\% ]/g, '')
+  .trim();
+
+const getComplimentStatusTone = (status = '') => {
+  const value = String(status).toUpperCase();
+  if (value.includes('READY')) return 'good';
+  if (value.includes('ACTIVE')) return 'good';
+  if (value.includes('EXPIRE')) return 'warn';
+  return 'bad';
 };
 
 const getMemberTierTone = (tier = '') => {
@@ -1588,7 +1612,8 @@ function Sidebar() {
         {NAV_ITEMS.map((item) => {
           const isActive = location.pathname === item.path
             || (item.path === '/summary' && location.pathname === '/')
-            || (item.path === '/members' && location.pathname.startsWith('/members'));
+            || (item.path === '/members' && location.pathname.startsWith('/members'))
+            || (item.path === '/compliments' && location.pathname.startsWith('/compliments'));
 
           return (
             <NavLink key={item.label} to={item.path} className={`nav-item ${isActive ? 'active' : ''}`}>
@@ -1607,6 +1632,28 @@ function Sidebar() {
         </div>
       </div>
     </aside>
+  );
+}
+
+function MobileBottomNav() {
+  const location = useLocation();
+
+  return (
+    <nav className="mobile-bottom-nav" aria-label="Mobile primary">
+        {MOBILE_NAV_ITEMS.map((item) => {
+          const isActive = location.pathname === item.path
+            || (item.path === '/summary' && location.pathname === '/')
+            || (item.path === '/ai-assistant' && location.pathname.startsWith('/ai-assistant'))
+            || (item.path === '/compliments' && location.pathname.startsWith('/compliments'));
+
+        return (
+          <NavLink key={item.label} to={item.path} className={`mobile-bottom-nav-item ${isActive ? 'active' : ''}`}>
+            <span className={`nav-icon nav-icon-${item.icon}`} />
+            <span>{item.label}</span>
+          </NavLink>
+        );
+      })}
+    </nav>
   );
 }
 
@@ -1678,7 +1725,8 @@ function SummaryView({
   ];
 
   return (
-    <div className="route-grid route-grid-summary">
+    <>
+      <div className="route-grid route-grid-summary summary-desktop-shell">
       <section className="panel summary-panel">
         <div className="panel-head">
           <div>
@@ -1807,7 +1855,243 @@ function SummaryView({
         </div>
         <DailyIncomePreview dashboard={dashboard} />
       </section>
-    </div>
+      </div>
+      <SummaryMobileView
+        dashboard={dashboard}
+        selectedBranch={selectedBranch}
+        selectedBranchId={selectedBranchId}
+        onSelectBranch={onSelectBranch}
+        onClearBranch={onClearBranch}
+      />
+    </>
+  );
+}
+
+function SummaryMobileView({
+  dashboard,
+  selectedBranch,
+  selectedBranchId,
+  onSelectBranch,
+  onClearBranch,
+}) {
+  const branchLocations = dashboard?.branchLocations || [];
+  const derivedSelectedBranch = selectedBranch
+    || branchLocations.find((branch) => String(getBranchStoreId(branch)) === String(selectedBranchId ?? ''))
+    || null;
+  const formatCount = (value) => Number(value || 0).toLocaleString('en-US');
+  const revenueToday = Number(dashboard?.revenueToday || 0);
+  const revenueMonth = Number(dashboard?.revenueMonth || 0);
+  const activeServices = Number(dashboard?.activeServices || 0);
+  const completedToday = Number(dashboard?.completedToday || 0);
+  const staffOnDuty = Number(dashboard?.staffOnDuty || 0);
+  const monthVehicleCount = Number(dashboard?.monthVehicleCount || 0);
+  const profitMargin = Number(dashboard?.profitMargin || 0);
+  const revenueTrend = Number(dashboard?.profitDelta || 0);
+  const monthlyTarget = derivedSelectedBranch
+    ? parseNumericValue(derivedSelectedBranch.monthlyTarget)
+    : branchLocations.reduce((sum, branch) => sum + parseNumericValue(branch.monthlyTarget), 0);
+  const monthlyTargetAchievement = monthlyTarget > 0
+    ? Math.min((revenueMonth / monthlyTarget) * 100, 100)
+    : 0;
+  const forecastIncome = revenueMonth > 0
+    ? Math.round((revenueMonth / Math.max(new Date().getDate(), 1)) * new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate())
+    : 0;
+  const systemStatus = Number(dashboard?.equipmentIssues || 0) > 0
+    ? 'ATTENTION'
+    : dashboard?.confidenceLabel === 'HIGH'
+      ? 'OPTIMAL'
+      : 'STABLE';
+  const efficiencyLift = Number(dashboard?.equipmentIssues || 0) > 0
+    ? 0
+    : Math.max(8, Math.round(Math.max(profitMargin, revenueTrend, 32) / 4));
+  const efficiencyCopy = Number(dashboard?.equipmentIssues || 0) > 0
+    ? 'Review open maintenance items before the next peak cycle.'
+    : `Efficiency up ${efficiencyLift}% since AI shift.`;
+  const insights = Array.isArray(dashboard?.insights) && dashboard.insights.length
+    ? dashboard.insights.slice(0, 2)
+    : [];
+  const branchRows = branchLocations.slice(0, 2);
+  const uptimeBars = (dashboard?.throughputBars?.length
+    ? dashboard.throughputBars
+    : DENSITY_BARS.map((value, index) => ({
+        time: DENSITY_LABELS[index]?.label || formatHourLabel(index),
+        realTime: value,
+      })))
+    .slice(0, 12);
+  const uptimePercent = Number(dashboard?.equipmentIssues || 0) > 0 ? 98.8 : 99.9;
+  const topBranchTrend = [4, 2];
+  const scopeLabel = derivedSelectedBranch?.name || dashboard?.scopeLabel || 'COMPANY PREVIEW';
+
+  return (
+    <section className="summary-mobile-shell" aria-label="Mobile dashboard summary">
+      <div className="summary-mobile-hero">
+        <div>
+          <div className="summary-mobile-status mono">SYSTEM STATUS: {systemStatus}</div>
+          <h1>Executive Overview</h1>
+        </div>
+        <div className="summary-mobile-scope">
+          <div className="summary-mobile-scope-label mono">CURRENT VIEW</div>
+          <div className="summary-mobile-scope-value">{scopeLabel}</div>
+          {derivedSelectedBranch ? (
+            <button type="button" className="summary-mobile-scope-button mono" onClick={onClearBranch}>
+              SHOW ALL BRANCHES
+            </button>
+          ) : (
+            <div className="summary-mobile-scope-pill mono">COMPANY PREVIEW</div>
+          )}
+        </div>
+      </div>
+
+      <section className="summary-mobile-card summary-mobile-revenue-card">
+        <div className="summary-mobile-card-label mono">TOTAL REVENUE (TODAY)</div>
+        <div className="summary-mobile-revenue-row">
+          <div className="summary-mobile-revenue-value">{formatRupiah(revenueToday)}</div>
+          <div className={`summary-mobile-revenue-change ${revenueTrend >= 0 ? 'up' : 'down'}`}>
+            {revenueTrend >= 0 ? '+' : ''}
+            {Math.round(revenueTrend)}%
+          </div>
+        </div>
+        <div className="summary-mobile-revenue-copy">
+          {dashboard
+            ? `MONTH REVENUE ${formatRupiah(revenueMonth)} • ACTIVE ${activeServices} • STAFF ${staffOnDuty}`
+            : 'MONTH REVENUE Rp0 • ACTIVE 0 • STAFF 0'}
+        </div>
+        <div className="summary-mobile-progress" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+          <span className="summary-mobile-progress-dim" />
+        </div>
+      </section>
+
+      <div className="summary-mobile-mini-grid">
+        <section className="summary-mobile-card summary-mobile-mini-card">
+          <div className="summary-mobile-card-label mono">VEHICLES</div>
+          <div className="summary-mobile-mini-value">{formatCount(monthVehicleCount)}</div>
+          <div className="summary-mobile-mini-copy mono">THROUGHPUT PEAK</div>
+        </section>
+        <section className="summary-mobile-card summary-mobile-mini-card summary-mobile-mini-card-accent">
+          <div className="summary-mobile-mini-icon">⚡</div>
+          <div className="summary-mobile-mini-copy-tight">{efficiencyCopy}</div>
+          <div className="summary-mobile-mini-copy mono">COMPLETED {completedToday} TODAY</div>
+        </section>
+      </div>
+
+      <section className="summary-mobile-card summary-mobile-insights-card">
+        <div className="summary-mobile-section-head">
+          <div className="summary-mobile-section-title">AI SMART INSIGHTS</div>
+          <div className="summary-mobile-section-meta mono">{insights.length ? `${insights.length} LIVE` : 'LIVE'}</div>
+        </div>
+
+        <div className="summary-mobile-insight-list">
+          {insights.length ? insights.map((item, index) => (
+            <article key={`${item.title || 'insight'}-${index}`} className={`summary-mobile-insight ${index === 0 ? 'summary-mobile-insight-primary' : ''}`}>
+              <div className="summary-mobile-insight-title">{item.title}</div>
+              <p className="summary-mobile-insight-body">{item.body}</p>
+              {index === 0 ? (
+                <button type="button" className="summary-mobile-insight-link mono" onClick={() => onSelectBranch?.(derivedSelectedBranch || branchLocations[0] || null)}>
+                  REVIEW PRICING STRATEGY
+                </button>
+              ) : null}
+            </article>
+          )) : (
+            <div className="summary-mobile-insight summary-mobile-insight-empty mono">
+              NO AI INSIGHTS AVAILABLE RIGHT NOW.
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="summary-mobile-card summary-mobile-forecast-card">
+        <div className="summary-mobile-section-head">
+          <div>
+            <div className="summary-mobile-section-title">MONTHLY REVENUE FORECAST</div>
+            <div className="summary-mobile-forecast-value">{formatRupiah(revenueMonth || 0)}</div>
+          </div>
+          <div className="summary-mobile-section-meta mono">
+            {monthlyTarget > 0 ? `${Math.round(monthlyTargetAchievement)}% GOAL` : 'RUN RATE'}
+          </div>
+        </div>
+
+        <div className="summary-mobile-forecast-copy">
+          {monthlyTarget > 0
+            ? `PROJECTED MONTH-END REVENUE BASED ON CURRENT RUN RATE • ${formatRupiah(Math.max(monthlyTarget - forecastIncome, 0))} TO TARGET`
+            : 'PROJECTED MONTH-END REVENUE BASED ON CURRENT RUN RATE'}
+        </div>
+
+        <div
+          className="summary-mobile-ring"
+          style={{ '--ring-progress': `${monthlyTarget > 0 ? monthlyTargetAchievement : 72}%` }}
+        >
+          <div className="summary-mobile-ring-inner">
+            <strong>{monthlyTarget > 0 ? `${Math.round(monthlyTargetAchievement)}%` : '72%'}</strong>
+            <span className="mono">GOAL</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="summary-mobile-card summary-mobile-branches-card">
+        <div className="summary-mobile-section-head">
+          <div className="summary-mobile-section-title">TOP PERFORMING BRANCHES</div>
+          <div className="summary-mobile-section-action mono">{branchRows.length ? 'VIEW ALL' : 'NONE'}</div>
+        </div>
+
+        <div className="summary-mobile-branch-list">
+          {branchRows.length ? branchRows.map((branch, index) => {
+            const branchName = branch.name || branch.code || branch.location || branch.address || `Branch ${index + 1}`;
+            const branchLocation = branch.location || branch.address || branch.raw?.city || branch.raw?.area || 'Branch location unavailable';
+            const branchMetric = parseNumericValue(branch.monthlyTarget || branch.monthlyRevenue || branch.revenue || 0);
+            const selected = String(selectedBranchId ?? derivedSelectedBranch?.storeId ?? derivedSelectedBranch?.id ?? '') === String(getBranchStoreId(branch) ?? '');
+
+            return (
+              <button
+                key={branch.id || branch.code || `${branchName}-${index}`}
+                type="button"
+                className={`summary-mobile-branch ${selected ? 'selected' : ''}`}
+                onClick={() => onSelectBranch(branch)}
+              >
+                <div className="summary-mobile-branch-rank">#{String(index + 1).padStart(2, '0')}</div>
+                <div className="summary-mobile-branch-copy">
+                  <strong>{branchName}</strong>
+                  <span className="mono">{branchLocation}</span>
+                </div>
+                <div className="summary-mobile-branch-meta">
+                  <strong>{formatRupiah(branchMetric)}</strong>
+                  <span className={`mono summary-mobile-branch-trend summary-mobile-branch-trend-${index === 0 ? 'up' : 'flat'}`}>
+                    {topBranchTrend[index] ? `↑ ${topBranchTrend[index]}%` : '↑ 0%'}
+                  </span>
+                </div>
+              </button>
+            );
+          }) : (
+            <div className="summary-mobile-empty mono">NO BRANCH DATA AVAILABLE.</div>
+          )}
+        </div>
+      </section>
+
+      <section className="summary-mobile-card summary-mobile-uptime-card">
+        <div className="summary-mobile-section-head">
+          <div className="summary-mobile-section-title">OPERATIONAL UPTIME</div>
+          <div className="summary-mobile-uptime-status mono">
+            <span className="summary-mobile-uptime-dot" />
+            {uptimePercent.toFixed(1)}%
+          </div>
+        </div>
+
+        <div className="summary-mobile-uptime-bars" aria-hidden="true">
+          {uptimeBars.map((bar, index) => {
+            const height = Math.max(
+              24,
+              Math.min(100, Math.round((Number(bar.realTime ?? bar.count ?? bar.value ?? bar) / Math.max(DENSITY_BARS[4], 1)) * 100))
+            );
+
+            return (
+              <span key={`${bar.time || 'bar'}-${index}`} style={{ height: `${height}%` }} />
+            );
+          })}
+        </div>
+      </section>
+    </section>
   );
 }
 
@@ -2635,6 +2919,393 @@ function MembersView({ dashboard }) {
           <StatCard key={item.label} item={item} />
         ))}
       </div>
+    </div>
+  );
+}
+
+function BarcodeSvg({ value, className = '', height = 110 }) {
+  const barcodeRef = useRef(null);
+  const barcodeValue = useMemo(() => sanitizeCode39Value(value), [value]);
+
+  useEffect(() => {
+    if (!barcodeRef.current || !barcodeValue) {
+      return;
+    }
+
+    try {
+      JsBarcode(barcodeRef.current, barcodeValue, {
+        format: 'CODE39',
+        width: 2,
+        height,
+        margin: 0,
+        displayValue: false,
+        lineColor: '#07111f',
+        background: '#ffffff',
+      });
+    } catch (error) {
+      console.error('Failed to render compliment barcode:', error);
+    }
+  }, [barcodeValue, height]);
+
+  return <svg ref={barcodeRef} className={className} role="img" aria-label={`Barcode for ${barcodeValue}`} />;
+}
+
+function ComplimentsView({ dashboard }) {
+  const scopeLabel = dashboard?.scopeLabel || 'COMPANY PREVIEW';
+  const [compliments, setCompliments] = useState([]);
+  const [summary, setSummary] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('active');
+  const [selectedComplimentId, setSelectedComplimentId] = useState(null);
+  const [refreshTick, setRefreshTick] = useState(0);
+  const [copyFeedback, setCopyFeedback] = useState('');
+  const [creatingVoucher, setCreatingVoucher] = useState(false);
+
+  useEffect(() => {
+    let isActive = true;
+
+    const loadCompliments = async () => {
+      setLoading(true);
+      setError('');
+
+      try {
+        const result = await fetchCompliments({
+          search,
+          status: statusFilter,
+          limit: 24,
+        });
+
+        if (!isActive) {
+          return;
+        }
+
+        const list = Array.isArray(result?.compliments) ? result.compliments : [];
+        setCompliments(list);
+        setSummary(result?.summary || null);
+
+        setSelectedComplimentId((current) => {
+          if (current && list.some((item) => String(item.complimentId ?? item.id) === String(current))) {
+            return current;
+          }
+
+          return list[0]?.complimentId ?? list[0]?.id ?? null;
+        });
+      } catch (err) {
+        if (isActive) {
+          setError(err instanceof Error ? err.message : 'Failed to load compliment passes');
+        }
+      } finally {
+        if (isActive) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadCompliments();
+
+    return () => {
+      isActive = false;
+    };
+  }, [refreshTick, search, statusFilter]);
+
+  const selectedCompliment = useMemo(
+    () => compliments.find((item) => String(item.complimentId ?? item.id) === String(selectedComplimentId ?? '')) || compliments[0] || null,
+    [compliments, selectedComplimentId]
+  );
+
+  const stats = [
+    {
+      label: 'READY TO SCAN',
+      value: String(summary?.active ?? 0),
+      subtext: 'VOUCHERS READY TO REDEEM',
+      bar: Math.min(Number(summary?.active ?? 0) * 8, 100),
+      tone: 'green',
+    },
+    {
+      label: 'INACTIVE',
+      value: String(summary?.inactive ?? 0),
+      subtext: 'PAUSED OR EXPIRED',
+      bar: Math.min(Number(summary?.inactive ?? 0) * 8, 100),
+      tone: 'bad',
+    },
+    {
+      label: 'EXPIRING SOON',
+      value: String(compliments.filter((item) => {
+        const expiresAt = item?.expiresAt ? new Date(item.expiresAt) : null;
+        if (!expiresAt || Number.isNaN(expiresAt.getTime())) {
+          return false;
+        }
+
+        const daysRemaining = (expiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
+        return daysRemaining <= 7 && daysRemaining >= 0;
+      }).length),
+      subtext: 'REVIEW THESE COUPONS',
+      bar: Math.min(
+        compliments.filter((item) => {
+          const expiresAt = item?.expiresAt ? new Date(item.expiresAt) : null;
+          if (!expiresAt || Number.isNaN(expiresAt.getTime())) {
+            return false;
+          }
+
+          const daysRemaining = (expiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
+          return daysRemaining <= 7 && daysRemaining >= 0;
+        }).length * 20,
+        100
+      ),
+      tone: 'sand',
+    },
+    {
+      label: 'TOTAL COUPON',
+      value: String(summary?.total ?? compliments.length ?? 0),
+      subtext: 'LOADED FROM tbl_coupon',
+      bar: Math.min(Number(summary?.total ?? compliments.length ?? 0) * 6, 100),
+      tone: 'sand',
+    },
+  ];
+  const expiringSoonCount = compliments.filter((item) => {
+    const expiresAt = item?.expiresAt ? new Date(item.expiresAt) : null;
+    if (!expiresAt || Number.isNaN(expiresAt.getTime())) {
+      return false;
+    }
+
+    const daysRemaining = (expiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
+    return daysRemaining <= 7 && daysRemaining >= 0;
+  }).length;
+
+  stats[2] = {
+    label: 'EXPIRING SOON',
+    value: String(expiringSoonCount),
+    subtext: 'REVIEW THESE COUPONS',
+    bar: Math.min(expiringSoonCount * 20, 100),
+    tone: 'sand',
+  };
+
+  const statusChips = [
+    { label: 'ACTIVE', value: 'active' },
+    { label: 'ALL', value: 'all' },
+    { label: 'INACTIVE', value: 'inactive' },
+  ];
+
+  const handleCopyCode = async () => {
+    const code = selectedCompliment?.barcodeValue || selectedCompliment?.complimentCode;
+    if (!code || typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopyFeedback('CODE COPIED');
+      window.setTimeout(() => setCopyFeedback(''), 2000);
+    } catch (copyError) {
+      console.error('Failed to copy compliment code:', copyError);
+    }
+  };
+
+  const handleGenerateVoucher = async () => {
+    if (creatingVoucher) {
+      return;
+    }
+
+    setCreatingVoucher(true);
+    setError('');
+
+    try {
+      const result = await createComplimentVoucher();
+      const created = result?.compliment || null;
+      setRefreshTick((tick) => tick + 1);
+
+      if (created?.complimentId || created?.id || created?.couponCode) {
+        const nextId = String(created.complimentId ?? created.id ?? created.couponCode);
+        setSelectedComplimentId(nextId);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create compliment voucher');
+    } finally {
+      setCreatingVoucher(false);
+    }
+  };
+
+  return (
+    <div className="route-grid route-grid-compliments compliments-view">
+      <section className="panel compliments-hero-panel">
+        <div className="compliments-hero">
+          <div>
+            <div className="panel-title compliments-panel-title">COMPLIMENTS</div>
+            <div className="panel-subtitle mono">BARCODE PASSES GENERATED FROM THE BACKEND API</div>
+          </div>
+
+          <div className="compliments-hero-copy mono">
+            <span>{scopeLabel}</span>
+            <span>{loading ? 'LOADING PASS LIST...' : `${compliments.length} PASS${compliments.length === 1 ? '' : 'ES'} READY`}</span>
+          </div>
+        </div>
+
+        <div className="compliments-controls">
+          <label className="member-search mono compliments-search">
+            <span>SEARCH PASS...</span>
+            <input
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search compliment pass..."
+            />
+          </label>
+
+          <div className="compliments-filter-bar">
+            {statusChips.map((chip) => (
+              <button
+                key={chip.value}
+                type="button"
+                className={`attendance-filter-chip ${statusFilter === chip.value ? 'attendance-filter-chip-active' : ''}`}
+                onClick={() => setStatusFilter(chip.value)}
+              >
+                <span>{chip.label}</span>
+              </button>
+            ))}
+            <button
+              type="button"
+              className="primary-btn compliments-generate-btn"
+              onClick={handleGenerateVoucher}
+              disabled={creatingVoucher}
+            >
+              {creatingVoucher ? 'CREATING...' : 'NEW VOUCHER'}
+            </button>
+            <button type="button" className="ghost-btn compliments-refresh-btn" onClick={() => setRefreshTick((tick) => tick + 1)}>
+              REFRESH API
+            </button>
+          </div>
+        </div>
+
+        {error ? <div className="error-banner">{error}</div> : null}
+
+        <div className="stats-row compliments-stats-row">
+          {stats.map((item) => (
+            <StatCard key={item.label} item={item} />
+          ))}
+        </div>
+      </section>
+
+      <section className="panel compliments-focus-panel">
+        <div className="panel-head">
+          <div>
+            <div className="panel-title">SELECTED PASS</div>
+            <div className="panel-subtitle mono">SCAN THE BARCODE TO REDEEM THE COMPLIMENT</div>
+          </div>
+          <div className={`member-status-pill member-status-pill-${getComplimentStatusTone(selectedCompliment?.status)}`}>
+            {selectedCompliment?.status || 'NO PASS'}
+          </div>
+        </div>
+
+        {selectedCompliment ? (
+          <>
+            <div className="compliment-hero-card">
+              <div className="compliment-hero-copy-block">
+                <div className="compliment-name">{selectedCompliment.name || selectedCompliment.couponCode}</div>
+                <div className="compliment-meta mono">
+                  CODE {selectedCompliment.couponCode} • {selectedCompliment.status}
+                </div>
+                <div className="compliment-code mono">{selectedCompliment.couponCode}</div>
+                <div className="compliment-reward">{selectedCompliment.rewardText}</div>
+                <div className="compliment-scan-hint mono">{selectedCompliment.scanHint}</div>
+              </div>
+
+              <div className="compliment-barcode-card">
+                <BarcodeSvg value={selectedCompliment.barcodeValue} className="compliment-barcode" height={126} />
+                <div className="compliment-barcode-caption mono">{selectedCompliment.barcodeValue}</div>
+              </div>
+            </div>
+
+            <div className="compliment-detail-grid">
+              <div className="compliment-detail-chip">
+                <span className="mono">COUPON CODE</span>
+                <strong>{selectedCompliment.couponCode}</strong>
+              </div>
+              <div className="compliment-detail-chip">
+                <span className="mono">DISCOUNT</span>
+                <strong>
+                  {selectedCompliment.discountValue !== null && typeof selectedCompliment.discountValue !== 'undefined'
+                    ? `${selectedCompliment.discountValue}${selectedCompliment.discountType ? ` ${selectedCompliment.discountType}` : ''}`
+                    : 'N/A'}
+                </strong>
+              </div>
+              <div className="compliment-detail-chip">
+                <span className="mono">ISSUED</span>
+                <strong>{formatMemberDate(selectedCompliment.issuedAt)}</strong>
+              </div>
+              <div className="compliment-detail-chip">
+                <span className="mono">EXPIRES</span>
+                <strong>{formatMemberDate(selectedCompliment.expiresAt)}</strong>
+              </div>
+            </div>
+
+            <div className="compliment-actions">
+              <button type="button" className="primary-btn" onClick={handleCopyCode}>
+                COPY CODE
+              </button>
+              <button type="button" className="ghost-btn" onClick={() => setRefreshTick((tick) => tick + 1)}>
+                RELOAD API
+              </button>
+            </div>
+
+            {copyFeedback ? <div className="compliment-copy-feedback mono">{copyFeedback}</div> : null}
+          </>
+        ) : (
+          <div className="compliment-empty mono">NO COMPLIMENT PASS AVAILABLE</div>
+        )}
+      </section>
+
+      <section className="panel compliments-list-panel">
+          <div className="panel-head">
+            <div>
+              <div className="panel-title">PASS LIST</div>
+              <div className="panel-subtitle mono">SELECT A COUPON TO RENDER THE BARCODE</div>
+            </div>
+            <div className="compliment-list-count mono">{compliments.length} FOUND</div>
+          </div>
+
+        <div className="compliments-list">
+          {loading && !compliments.length ? (
+            <div className="compliment-empty mono">LOADING PASS LIST...</div>
+          ) : compliments.length ? (
+            compliments.map((item) => {
+              const id = String(item.complimentId ?? item.id);
+              const isActive = String(selectedComplimentId ?? '') === id;
+
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  className={`compliment-list-card ${isActive ? 'compliment-list-card-active' : ''}`}
+                  onClick={() => setSelectedComplimentId(id)}
+                >
+                  <div className="compliment-list-card-head">
+                    <div>
+                      <div className="compliment-list-name">{item.name}</div>
+                      <div className="compliment-list-meta mono">
+                        {item.couponCode} • {item.rewardText}
+                      </div>
+                    </div>
+                    <div className={`compliment-status-pill compliment-status-pill-${getComplimentStatusTone(item.status)}`}>
+                      {item.status}
+                    </div>
+                  </div>
+
+                  <div className="compliment-list-barcode mono">{item.barcodeValue}</div>
+                  <div className="compliment-list-sub mono">
+                    {item.discountValue !== null && typeof item.discountValue !== 'undefined'
+                      ? `DISCOUNT ${item.discountValue}${item.discountType ? ` ${item.discountType}` : ''}`
+                      : item.rewardText}
+                  </div>
+                </button>
+              );
+            })
+          ) : (
+            <div className="compliment-empty mono">NO COMPLIMENT PASSES MATCH THE CURRENT FILTER</div>
+          )}
+        </div>
+      </section>
     </div>
   );
 }
@@ -4092,6 +4763,7 @@ function DashboardContent({ session, onLogout }) {
           />
           <Route path="/members" element={<MembersView dashboard={dashboard} />} />
           <Route path="/members/:memberId" element={<MembersView dashboard={dashboard} />} />
+          <Route path="/compliments" element={<ComplimentsView dashboard={dashboard} />} />
           <Route path="/inventory" element={<InventoryView dashboard={dashboard} />} />
           <Route
             path="/attendance"
@@ -4158,6 +4830,8 @@ function DashboardContent({ session, onLogout }) {
           onSend={handleSendChat}
           onPickPrompt={handlePickChatPrompt}
         />
+
+        <MobileBottomNav />
       </main>
     </div>
   );
