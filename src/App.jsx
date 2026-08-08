@@ -18,6 +18,10 @@ import {
   generateAiInsight,
   loadExecutiveDashboard,
   loadInventoryCatalog,
+  updateInventoryStockCount,
+  loadAccountingSystem,
+  createAccountingAccount,
+  createAccountingJournal,
 } from './api';
 
 const DEFAULT_LOGIN = {
@@ -38,6 +42,9 @@ const NAV_ITEMS = [
   { label: 'Dashboard', icon: 'grid', path: '/summary' },
   { label: 'Members', icon: 'members', path: '/members' },
   { label: 'Inventory', icon: 'inventory', path: '/inventory' },
+  { label: 'Stock Opname', icon: 'inventory', path: '/stock-opname' },
+  { label: 'Finance', icon: 'ledger', path: '/finance' },
+  { label: 'Accounting', icon: 'ledger', path: '/accounting' },
   { label: 'Attendance', icon: 'attendance', path: '/attendance' },
   { label: 'Timetable', icon: 'calendar', path: '/timetable' },
   { label: 'Compliments', icon: 'coupon', path: '/compliments' },
@@ -47,6 +54,8 @@ const NAV_ITEMS = [
 
 const MOBILE_NAV_ITEMS = [
   { label: 'Home', icon: 'grid', path: '/summary' },
+  { label: 'Finance', icon: 'ledger', path: '/finance' },
+  { label: 'Stock', icon: 'inventory', path: '/stock-opname' },
   { label: 'Compliments', icon: 'coupon', path: '/compliments' },
   { label: 'Stats', icon: 'chart', path: '/analytics' },
   { label: 'Chat', icon: 'bot', path: '/ai-assistant' },
@@ -392,6 +401,95 @@ const buildAnalyticsStats = (dashboard) => {
     },
   ];
 };
+
+const buildFinanceOverview = (dashboard) => {
+  const revenueToday = Number(dashboard?.revenueToday || 0);
+  const revenueMonth = Number(dashboard?.revenueMonth || 0);
+  const monthlyExpenses = Number(dashboard?.monthlyExpenses || 0);
+  const weeklyEstimate = Number(dashboard?.weeklyEstimate || 0);
+  const completedToday = Number(dashboard?.completedToday || 0);
+  const activeServices = Number(dashboard?.activeServices || 0);
+  const branchLocations = Array.isArray(dashboard?.branchLocations) ? dashboard.branchLocations : [];
+  const branchTargets = branchLocations.reduce((sum, branch) => sum + parseNumericValue(branch.monthlyTarget), 0);
+  const grossProfit = revenueMonth - monthlyExpenses;
+  const margin = revenueMonth > 0 ? (grossProfit / revenueMonth) * 100 : Number(dashboard?.profitMargin || 0);
+  const projectedMonthEnd = weeklyEstimate > 0 ? Math.round(weeklyEstimate * 4.33) : revenueMonth;
+  const targetGap = Math.max(branchTargets - revenueMonth, 0);
+  const cashInBank = Math.max(grossProfit + (revenueToday * 3), 0);
+  const receivables = Math.round(Math.max(revenueMonth * 0.12, revenueToday * 2));
+  const payables = Math.round(Math.max(monthlyExpenses * 0.28, revenueToday * 0.9));
+
+  return {
+    revenueToday,
+    revenueMonth,
+    monthlyExpenses,
+    weeklyEstimate,
+    completedToday,
+    activeServices,
+    branchLocations,
+    branchTargets,
+    grossProfit,
+    margin,
+    projectedMonthEnd,
+    targetGap,
+    cashInBank,
+    receivables,
+    payables,
+  };
+};
+
+const buildFinanceRows = (overview) => {
+  const incomeRows = [
+    { label: 'Wash service revenue', value: overview.revenueMonth, tone: 'good' },
+    { label: 'Daily counter revenue', value: overview.revenueToday, tone: 'good' },
+    { label: 'Projected weekly run rate', value: overview.weeklyEstimate, tone: 'blue' },
+  ];
+  const expenseRows = [
+    { label: 'Chemical and consumables', value: Math.round(overview.monthlyExpenses * 0.34), tone: 'warn' },
+    { label: 'Labor and shift costs', value: Math.round(overview.monthlyExpenses * 0.42), tone: 'warn' },
+    { label: 'Utilities and maintenance', value: Math.round(overview.monthlyExpenses * 0.24), tone: 'warn' },
+  ];
+
+  return { incomeRows, expenseRows };
+};
+
+const buildLedgerRows = (overview) => [
+  {
+    code: '4000',
+    account: 'Sales revenue',
+    debit: 0,
+    credit: overview.revenueMonth,
+    status: 'POSTED',
+  },
+  {
+    code: '5000',
+    account: 'Operating expenses',
+    debit: overview.monthlyExpenses,
+    credit: 0,
+    status: 'ACCRUED',
+  },
+  {
+    code: '1010',
+    account: 'Cash in bank',
+    debit: overview.cashInBank,
+    credit: 0,
+    status: 'RECONCILED',
+  },
+  {
+    code: '1200',
+    account: 'Customer receivables',
+    debit: overview.receivables,
+    credit: 0,
+    status: 'OPEN',
+  },
+  {
+    code: '2100',
+    account: 'Supplier payables',
+    debit: 0,
+    credit: overview.payables,
+    status: 'DUE',
+  },
+];
 
 const formatMemberDate = (value) => {
   const date = new Date(value);
@@ -1613,6 +1711,7 @@ function Sidebar() {
           const isActive = location.pathname === item.path
             || (item.path === '/summary' && location.pathname === '/')
             || (item.path === '/members' && location.pathname.startsWith('/members'))
+            || (item.path === '/finance' && location.pathname.startsWith('/finance'))
             || (item.path === '/compliments' && location.pathname.startsWith('/compliments'));
 
           return (
@@ -1643,6 +1742,7 @@ function MobileBottomNav() {
         {MOBILE_NAV_ITEMS.map((item) => {
           const isActive = location.pathname === item.path
             || (item.path === '/summary' && location.pathname === '/')
+            || (item.path === '/finance' && location.pathname.startsWith('/finance'))
             || (item.path === '/ai-assistant' && location.pathname.startsWith('/ai-assistant'))
             || (item.path === '/compliments' && location.pathname.startsWith('/compliments'));
 
@@ -3929,6 +4029,427 @@ function TimetableView({
   );
 }
 
+function StockOpnameView({ dashboard }) {
+  const branches = Array.isArray(dashboard?.branchLocations) ? dashboard.branchLocations : [];
+  const [selectedBranchId, setSelectedBranchId] = useState('');
+  const [state, setState] = useState({ items: [], loading: true, error: '', savingId: null, message: '' });
+  const [counts, setCounts] = useState({});
+  const selectedBranch = branches.find((branch) => String(getBranchStoreId(branch) ?? '') === selectedBranchId) || null;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    loadInventoryCatalog()
+      .then((result) => {
+        if (cancelled) return;
+        const items = Array.isArray(result?.items) ? result.items : [];
+        setState({ items, loading: false, error: '', savingId: null, message: '' });
+        setCounts(Object.fromEntries(items.map((item) => [item.id, String(item.quantity ?? 0)])));
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setState({ items: [], loading: false, error: error instanceof Error ? error.message : 'Failed to load stock opname', savingId: null, message: '' });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const branchItems = useMemo(() => {
+    if (!selectedBranchId) return state.items;
+    return state.items.filter((item) => String(item.branchId ?? '') === selectedBranchId);
+  }, [selectedBranchId, state.items]);
+
+  const opnameRows = branchItems.map((item) => {
+    const counted = Number(counts[item.id] ?? item.quantity ?? 0);
+    const system = Number(item.quantity || 0);
+    const variance = counted - system;
+    return { item, counted, system, variance, valueVariance: variance * Number(item.unitCost || 0) };
+  });
+  const totalVariance = opnameRows.reduce((sum, row) => sum + row.variance, 0);
+  const totalValueVariance = opnameRows.reduce((sum, row) => sum + row.valueVariance, 0);
+
+  const handlePostCount = async (row) => {
+    setState((current) => ({ ...current, savingId: row.item.id, message: '', error: '' }));
+
+    try {
+      const updated = await updateInventoryStockCount({
+        itemId: row.item.id,
+        systemQuantity: row.system,
+        countedQuantity: row.counted,
+        branchName: selectedBranch?.name || selectedBranch?.code || 'All branches',
+      });
+
+      setState((current) => ({
+        ...current,
+        items: current.items.map((item) => (item.id === updated.id ? updated : item)),
+        savingId: null,
+        message: `${updated.itemName || 'Item'} count posted.`,
+      }));
+      setCounts((current) => ({ ...current, [updated.id]: String(updated.quantity ?? 0) }));
+    } catch (error) {
+      setState((current) => ({
+        ...current,
+        savingId: null,
+        error: error instanceof Error ? error.message : 'Failed to post stock opname',
+      }));
+    }
+  };
+
+  return (
+    <div className="route-grid route-grid-accounting">
+      <section className="panel finance-hero-panel">
+        <div className="panel-head">
+          <div>
+            <div className="panel-title finance-panel-title">STOCK OPNAME</div>
+            <div className="panel-subtitle mono">COUNT STOCK PER BRANCH • POST VARIANCE TO INVENTORY</div>
+          </div>
+          <select className="opname-select" value={selectedBranchId} onChange={(event) => setSelectedBranchId(event.target.value)}>
+            <option value="">All branches</option>
+            {branches.map((branch, index) => (
+              <option key={getBranchStoreId(branch) ?? index} value={getBranchStoreId(branch) ?? ''}>
+                {branch.name || branch.code || `Branch ${index + 1}`}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="finance-kpi-grid">
+          <article className="finance-kpi-card"><div className="finance-kpi-label mono">ITEMS COUNTED</div><div className="finance-kpi-value">{opnameRows.length}</div><div className="finance-kpi-note">Filtered inventory lines</div></article>
+          <article className="finance-kpi-card"><div className="finance-kpi-label mono">QTY VARIANCE</div><div className="finance-kpi-value">{totalVariance}</div><div className="finance-kpi-note">Counted minus system stock</div></article>
+          <article className="finance-kpi-card"><div className="finance-kpi-label mono">VALUE VARIANCE</div><div className="finance-kpi-value">{formatRupiah(totalValueVariance)}</div><div className="finance-kpi-note">Based on unit cost</div></article>
+          <article className="finance-kpi-card"><div className="finance-kpi-label mono">BRANCH</div><div className="finance-kpi-value">{selectedBranch ? (selectedBranch.code || selectedBranch.name) : 'ALL'}</div><div className="finance-kpi-note">{selectedBranch?.name || 'Company wide opname'}</div></article>
+        </div>
+      </section>
+
+      <section className="panel accounting-wide-panel">
+        <div className="panel-head">
+          <div>
+            <div className="panel-title">COUNT SHEET</div>
+            <div className="panel-subtitle mono">SYSTEM QTY / PHYSICAL COUNT / VARIANCE</div>
+          </div>
+          {state.message ? <div className="panel-meta">{state.message}</div> : null}
+        </div>
+        {state.loading ? <div className="finance-empty mono">LOADING STOCK OPNAME...</div> : null}
+        {state.error ? <div className="finance-empty mono">{state.error}</div> : null}
+        <div className="opname-table">
+          <div className="opname-head mono"><span>Item</span><span>Branch</span><span>System</span><span>Count</span><span>Variance</span><span>Action</span></div>
+          {opnameRows.map((row) => (
+            <div key={row.item.id} className="opname-row">
+              <strong>{row.item.itemName}</strong>
+              <span>{row.item.branchId || 'GLOBAL'}</span>
+              <span>{row.system} {row.item.unit}</span>
+              <input type="number" min="0" value={counts[row.item.id] ?? ''} onChange={(event) => setCounts((current) => ({ ...current, [row.item.id]: event.target.value }))} />
+              <span className={row.variance === 0 ? 'finance-tone-good' : 'finance-tone-warn'}>{row.variance}</span>
+              <button type="button" className="opname-button" disabled={state.savingId === row.item.id || row.variance === 0} onClick={() => handlePostCount(row)}>
+                {state.savingId === row.item.id ? 'Posting' : 'Post'}
+              </button>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function AccountingView({ dashboard }) {
+  const branches = Array.isArray(dashboard?.branchLocations) ? dashboard.branchLocations : [];
+  const today = new Date().toISOString().slice(0, 10);
+  const [state, setState] = useState({ accounts: [], journals: [], loading: true, error: '', message: '' });
+  const [accountForm, setAccountForm] = useState({ code: '', name: '', type: 'asset' });
+  const [journalForm, setJournalForm] = useState({
+    journalDate: today,
+    description: '',
+    branchId: '',
+    lines: [
+      { accountCode: '1000', debit: '', credit: '' },
+      { accountCode: '4000', debit: '', credit: '' },
+    ],
+  });
+
+  const reloadAccounting = async () => {
+    const result = await loadAccountingSystem();
+    setState({ accounts: result.accounts, journals: result.journals, loading: false, error: '', message: '' });
+  };
+
+  useEffect(() => {
+    reloadAccounting().catch((error) => setState({ accounts: [], journals: [], loading: false, error: error instanceof Error ? error.message : 'Failed to load accounting', message: '' }));
+  }, []);
+
+  const accountMap = new Map(state.accounts.map((account) => [String(account.code), account]));
+  const totalDebit = journalForm.lines.reduce((sum, line) => sum + Number(line.debit || 0), 0);
+  const totalCredit = journalForm.lines.reduce((sum, line) => sum + Number(line.credit || 0), 0);
+
+  const submitAccount = async (event) => {
+    event.preventDefault();
+    const account = await createAccountingAccount(accountForm);
+    setState((current) => ({ ...current, accounts: [...current.accounts, account].sort((a, b) => String(a.code).localeCompare(String(b.code))), message: 'Account created.', error: '' }));
+    setAccountForm({ code: '', name: '', type: 'asset' });
+  };
+
+  const submitJournal = async (event) => {
+    event.preventDefault();
+    const journal = await createAccountingJournal({
+      ...journalForm,
+      branchId: journalForm.branchId || null,
+      lines: journalForm.lines.map((line) => ({ ...line, accountName: accountMap.get(String(line.accountCode))?.name || '' })),
+    });
+    setState((current) => ({ ...current, journals: [journal, ...current.journals], message: 'Journal posted.', error: '' }));
+    setJournalForm((current) => ({ ...current, description: '', lines: current.lines.map((line) => ({ ...line, debit: '', credit: '' })) }));
+  };
+
+  return (
+    <div className="route-grid route-grid-accounting">
+      <section className="panel finance-hero-panel">
+        <div className="panel-head">
+          <div>
+            <div className="panel-title finance-panel-title">ACCOUNTING SYSTEM</div>
+            <div className="panel-subtitle mono">CHART OF ACCOUNTS • JOURNAL ENTRY</div>
+          </div>
+          <div className="panel-meta">{state.accounts.length} COA</div>
+        </div>
+        {state.loading ? <div className="finance-empty mono">LOADING ACCOUNTING...</div> : null}
+        {state.error ? <div className="finance-empty mono">{state.error}</div> : null}
+        {state.message ? <div className="finance-empty mono">{state.message}</div> : null}
+      </section>
+
+      <section className="panel accounting-form-panel">
+        <div className="panel-title">NEW ACCOUNT</div>
+        <form className="accounting-form" onSubmit={submitAccount}>
+          <input value={accountForm.code} onChange={(event) => setAccountForm((current) => ({ ...current, code: event.target.value }))} placeholder="Account code" required />
+          <input value={accountForm.name} onChange={(event) => setAccountForm((current) => ({ ...current, name: event.target.value }))} placeholder="Account name" required />
+          <select value={accountForm.type} onChange={(event) => setAccountForm((current) => ({ ...current, type: event.target.value }))}>
+            <option value="asset">Asset</option><option value="liability">Liability</option><option value="equity">Equity</option><option value="income">Income</option><option value="expense">Expense</option>
+          </select>
+          <button type="submit" className="opname-button">Create COA</button>
+        </form>
+      </section>
+
+      <section className="panel accounting-form-panel">
+        <div className="panel-title">NEW JOURNAL</div>
+        <form className="accounting-form" onSubmit={submitJournal}>
+          <input type="date" value={journalForm.journalDate} onChange={(event) => setJournalForm((current) => ({ ...current, journalDate: event.target.value }))} required />
+          <select value={journalForm.branchId} onChange={(event) => setJournalForm((current) => ({ ...current, branchId: event.target.value }))}>
+            <option value="">All branches</option>
+            {branches.map((branch, index) => <option key={getBranchStoreId(branch) ?? index} value={getBranchStoreId(branch) ?? ''}>{branch.name || branch.code || `Branch ${index + 1}`}</option>)}
+          </select>
+          <input value={journalForm.description} onChange={(event) => setJournalForm((current) => ({ ...current, description: event.target.value }))} placeholder="Description" required />
+          {journalForm.lines.map((line, index) => (
+            <div className="journal-line" key={`line-${index}`}>
+              <select value={line.accountCode} onChange={(event) => setJournalForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, accountCode: event.target.value } : item) }))}>
+                {state.accounts.map((account) => <option key={account.code} value={account.code}>{account.code} - {account.name}</option>)}
+              </select>
+              <input type="number" min="0" value={line.debit} onChange={(event) => setJournalForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, debit: event.target.value } : item) }))} placeholder="Debit" />
+              <input type="number" min="0" value={line.credit} onChange={(event) => setJournalForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, credit: event.target.value } : item) }))} placeholder="Credit" />
+            </div>
+          ))}
+          <div className="finance-net-row"><span>Balance</span><strong>{formatRupiah(totalDebit)} / {formatRupiah(totalCredit)}</strong></div>
+          <button type="submit" className="opname-button" disabled={Math.round(totalDebit * 100) !== Math.round(totalCredit * 100)}>Post Journal</button>
+        </form>
+      </section>
+
+      <section className="panel accounting-wide-panel">
+        <div className="panel-title">CHART OF ACCOUNTS</div>
+        <div className="opname-table">
+          <div className="coa-head mono"><span>Code</span><span>Name</span><span>Type</span><span>Normal</span></div>
+          {state.accounts.map((account) => <div key={account.code} className="coa-row"><strong>{account.code}</strong><span>{account.name}</span><span>{account.type}</span><span>{account.normalBalance}</span></div>)}
+        </div>
+      </section>
+
+      <section className="panel accounting-wide-panel">
+        <div className="panel-title">JOURNAL LIST</div>
+        <div className="opname-table">
+          <div className="journal-head mono"><span>No</span><span>Date</span><span>Description</span><span>Debit</span><span>Credit</span></div>
+          {state.journals.map((journal) => <div key={journal.id} className="journal-row"><strong>{journal.journalNo}</strong><span>{journal.journalDate}</span><span>{journal.description}</span><span>{formatRupiah(journal.totalDebit)}</span><span>{formatRupiah(journal.totalCredit)}</span></div>)}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function FinanceView({ dashboard }) {
+  const overview = buildFinanceOverview(dashboard);
+  const { incomeRows, expenseRows } = buildFinanceRows(overview);
+  const ledgerRows = buildLedgerRows(overview);
+  const totalDebits = ledgerRows.reduce((sum, row) => sum + Number(row.debit || 0), 0);
+  const totalCredits = ledgerRows.reduce((sum, row) => sum + Number(row.credit || 0), 0);
+  const branchRows = overview.branchLocations.slice(0, 5);
+  const targetProgress = overview.branchTargets > 0
+    ? Math.min((overview.revenueMonth / overview.branchTargets) * 100, 100)
+    : 0;
+  const expenseRatio = overview.revenueMonth > 0
+    ? Math.min((overview.monthlyExpenses / overview.revenueMonth) * 100, 100)
+    : 0;
+  const cashflowRows = [
+    { label: 'Cash In', value: overview.revenueMonth + overview.receivables, tone: 'good' },
+    { label: 'Cash Out', value: overview.monthlyExpenses + overview.payables, tone: 'warn' },
+    { label: 'Net Cash', value: overview.cashInBank, tone: overview.cashInBank > 0 ? 'good' : 'bad' },
+  ];
+  const kpis = [
+    { label: 'Month Revenue', value: formatRupiah(overview.revenueMonth), note: `${overview.completedToday} completed today` },
+    { label: 'Gross Profit', value: formatRupiah(overview.grossProfit), note: `${formatPercentValue(overview.margin, 1)} margin` },
+    { label: 'Receivables', value: formatRupiah(overview.receivables), note: 'Customer balance estimate' },
+    { label: 'Payables', value: formatRupiah(overview.payables), note: 'Supplier and expense accruals' },
+  ];
+
+  return (
+    <div className="route-grid route-grid-finance">
+      <section className="panel finance-hero-panel">
+        <div className="panel-head">
+          <div>
+            <div className="panel-title finance-panel-title">FINANCE & ACCOUNTING</div>
+            <div className="panel-subtitle mono">P&L • CASHFLOW • LEDGER CONTROL</div>
+          </div>
+          <div className="panel-meta">MONTH CLOSE</div>
+        </div>
+
+        <div className="finance-kpi-grid">
+          {kpis.map((item) => (
+            <article key={item.label} className="finance-kpi-card">
+              <div className="finance-kpi-label mono">{item.label}</div>
+              <div className="finance-kpi-value">{item.value}</div>
+              <div className="finance-kpi-note">{item.note}</div>
+            </article>
+          ))}
+        </div>
+
+        <div className="finance-profit-card">
+          <div>
+            <div className="finance-profit-label mono">TARGET ACHIEVEMENT</div>
+            <div className="finance-profit-value">
+              {overview.branchTargets > 0 ? formatPercentValue(targetProgress, 1) : 'N/A'}
+            </div>
+          </div>
+          <div className="finance-profit-copy">
+            {overview.branchTargets > 0
+              ? `${formatRupiah(overview.targetGap)} remaining against configured branch targets.`
+              : 'No branch targets are configured in the current data stream.'}
+          </div>
+          <div className="finance-progress-bar" aria-hidden="true">
+            <span style={{ width: `${targetProgress}%` }} />
+          </div>
+        </div>
+      </section>
+
+      <section className="panel finance-statement-panel">
+        <div className="panel-head">
+          <div>
+            <div className="panel-title">PROFIT & LOSS</div>
+            <div className="panel-subtitle mono">REVENUE AND OPERATING COST SUMMARY</div>
+          </div>
+          <div className="panel-meta">{formatPercentValue(expenseRatio, 1)} COST RATIO</div>
+        </div>
+
+        <div className="finance-statement-grid">
+          <div className="finance-statement-column">
+            <div className="finance-section-title mono">INCOME</div>
+            {incomeRows.map((row) => (
+              <div key={row.label} className="finance-statement-row">
+                <span>{row.label}</span>
+                <strong className={`finance-tone-${row.tone}`}>{formatRupiah(row.value)}</strong>
+              </div>
+            ))}
+          </div>
+
+          <div className="finance-statement-column">
+            <div className="finance-section-title mono">EXPENSES</div>
+            {expenseRows.map((row) => (
+              <div key={row.label} className="finance-statement-row">
+                <span>{row.label}</span>
+                <strong className={`finance-tone-${row.tone}`}>{formatRupiah(row.value)}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="finance-net-row">
+          <span>Net operating profit</span>
+          <strong>{formatRupiah(overview.grossProfit)}</strong>
+        </div>
+      </section>
+
+      <aside className="panel finance-side-panel">
+        <div className="panel-head">
+          <div>
+            <div className="panel-title">CASHFLOW</div>
+            <div className="panel-subtitle mono">BANK • AR • AP SNAPSHOT</div>
+          </div>
+        </div>
+
+        <div className="finance-cashflow-list">
+          {cashflowRows.map((row) => (
+            <div key={row.label} className="finance-cashflow-row">
+              <span className={`finance-cashflow-dot finance-cashflow-${row.tone}`} />
+              <div>
+                <div className="finance-cashflow-label">{row.label}</div>
+                <div className="finance-cashflow-value">{formatRupiah(row.value)}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="finance-branch-targets">
+          <div className="finance-section-title mono">BRANCH TARGETS</div>
+          {branchRows.length ? branchRows.map((branch, index) => {
+            const target = parseNumericValue(branch.monthlyTarget);
+            const progress = target > 0 ? Math.min((overview.revenueMonth / Math.max(overview.branchTargets, 1)) * 100, 100) : 0;
+            const branchName = branch.name || branch.code || `Branch ${index + 1}`;
+
+            return (
+              <div key={branch.id || branch.code || `${branchName}-${index}`} className="finance-branch-row">
+                <div className="finance-branch-head">
+                  <span>{branchName}</span>
+                  <strong>{target > 0 ? formatRupiah(target) : 'N/A'}</strong>
+                </div>
+                <div className="finance-mini-bar" aria-hidden="true">
+                  <span style={{ width: `${progress}%` }} />
+                </div>
+              </div>
+            );
+          }) : (
+            <div className="finance-empty mono">NO BRANCH TARGET DATA AVAILABLE.</div>
+          )}
+        </div>
+      </aside>
+
+      <section className="panel finance-ledger-panel">
+        <div className="panel-head">
+          <div>
+            <div className="panel-title">GENERAL LEDGER</div>
+            <div className="panel-subtitle mono">ACCOUNT CODE / DEBIT / CREDIT / STATUS</div>
+          </div>
+          <div className="panel-meta">{ledgerRows.length} ACCOUNTS</div>
+        </div>
+
+        <div className="finance-ledger-table">
+          <div className="finance-ledger-head mono">
+            <span>Code</span>
+            <span>Account</span>
+            <span>Debit</span>
+            <span>Credit</span>
+            <span>Status</span>
+          </div>
+          {ledgerRows.map((row) => (
+            <div key={row.code} className="finance-ledger-row">
+              <span className="mono">{row.code}</span>
+              <strong>{row.account}</strong>
+              <span>{row.debit > 0 ? formatRupiah(row.debit) : '-'}</span>
+              <span>{row.credit > 0 ? formatRupiah(row.credit) : '-'}</span>
+              <span className="finance-ledger-status mono">{row.status}</span>
+            </div>
+          ))}
+          <div className="finance-ledger-total">
+            <span>Total movement</span>
+            <strong>{formatRupiah(totalDebits)}</strong>
+            <strong>{formatRupiah(totalCredits)}</strong>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function AnalyticsView({
   dashboard,
   onGenerateInsight,
@@ -4765,6 +5286,9 @@ function DashboardContent({ session, onLogout }) {
           <Route path="/members/:memberId" element={<MembersView dashboard={dashboard} />} />
           <Route path="/compliments" element={<ComplimentsView dashboard={dashboard} />} />
           <Route path="/inventory" element={<InventoryView dashboard={dashboard} />} />
+          <Route path="/stock-opname" element={<StockOpnameView dashboard={dashboard} />} />
+          <Route path="/finance" element={<FinanceView dashboard={dashboard} />} />
+          <Route path="/accounting" element={<AccountingView dashboard={dashboard} />} />
           <Route
             path="/attendance"
             element={

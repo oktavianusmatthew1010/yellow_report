@@ -285,6 +285,49 @@ export const loadInventoryCatalog = async ({ limit = 100 } = {}) => {
   };
 };
 
+export const updateInventoryStockCount = async ({ itemId, systemQuantity, countedQuantity, branchName }) => {
+  const change = Number(countedQuantity || 0) - Number(systemQuantity || 0);
+  const result = await requestJson(`/inventory/${encodeURIComponent(String(itemId))}/adjust-stock`, {
+    method: 'POST',
+    body: {
+      change,
+      reason: `Stock opname${branchName ? ` - ${branchName}` : ''}: counted ${countedQuantity}, system ${systemQuantity}`,
+    },
+  });
+
+  return result.data;
+};
+
+export const loadAccountingSystem = async () => {
+  const [coaResult, journalsResult] = await Promise.all([
+    requestJson('/accounting/coa'),
+    requestJson('/accounting/journals'),
+  ]);
+
+  return {
+    accounts: Array.isArray(coaResult?.data) ? coaResult.data : [],
+    journals: Array.isArray(journalsResult?.data) ? journalsResult.data : [],
+  };
+};
+
+export const createAccountingAccount = async (payload) => {
+  const result = await requestJson('/accounting/coa', {
+    method: 'POST',
+    body: payload,
+  });
+
+  return result.data;
+};
+
+export const createAccountingJournal = async (payload) => {
+  const result = await requestJson('/accounting/journals', {
+    method: 'POST',
+    body: payload,
+  });
+
+  return result.data;
+};
+
 export const loginStaff = async ({ identifier, email, password }) => {
   const loginIdentifier = String(identifier || email || '').trim();
   const response = await fetch(`${getApiBaseUrl()}/auth/login`, {
