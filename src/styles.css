@@ -30,6 +30,7 @@ body,
 
 body {
   font-family: 'Roboto Condensed', 'Segoe UI', sans-serif;
+  font-size: 15px;
   background:
     linear-gradient(180deg, #031221 0%, var(--bg) 20%, #031525 100%);
   color: var(--text);
@@ -47,7 +48,7 @@ button {
 .ops-shell {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 310px 1fr;
+  grid-template-columns: 280px 1fr;
   background:
     radial-gradient(circle at 14% 18%, rgba(255, 209, 28, 0.06), transparent 16%),
     radial-gradient(circle at 80% 10%, rgba(255, 209, 28, 0.04), transparent 18%);
@@ -333,18 +334,19 @@ button {
 }
 
 .nav-item {
-  height: 62px;
+  min-height: 58px;
   display: flex;
   align-items: center;
-  gap: 18px;
-  padding: 0 22px;
+  gap: 14px;
+  padding: 0 18px;
   border: 0;
   border-top: 1px solid rgba(255, 209, 28, 0.12);
   border-bottom: 1px solid rgba(255, 209, 28, 0.08);
   background: transparent;
   color: var(--text);
-  font-size: 1.02rem;
-  letter-spacing: 0.08em;
+  font-size: 0.88rem;
+  letter-spacing: 0.04em;
+  line-height: 1.15;
   cursor: pointer;
   text-align: left;
   text-decoration: none;
@@ -1305,7 +1307,7 @@ button {
 }
 
 .finance-panel-title {
-  font-size: clamp(1.8rem, 3vw, 3.5rem);
+  font-size: clamp(1.45rem, 2.4vw, 2.7rem);
   line-height: 1;
 }
 
@@ -1316,8 +1318,8 @@ button {
 }
 
 .finance-kpi-card {
-  min-height: 136px;
-  padding: 18px;
+  min-height: 118px;
+  padding: 14px;
   border: 1px solid rgba(255, 209, 28, 0.14);
   background: rgba(255, 255, 255, 0.035);
 }
@@ -1325,23 +1327,24 @@ button {
 .finance-kpi-label,
 .finance-section-title {
   color: #dccda7;
-  font-size: 0.78rem;
-  letter-spacing: 0.14em;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
 }
 
 .finance-kpi-value {
-  margin-top: 18px;
+  margin-top: 12px;
   color: #f6f2dd;
-  font-size: clamp(1.45rem, 2.2vw, 2.35rem);
+  font-size: clamp(1.05rem, 1.65vw, 1.75rem);
   font-weight: 800;
   line-height: 1.05;
+  overflow-wrap: anywhere;
 }
 
 .finance-kpi-note {
-  margin-top: 10px;
+  margin-top: 8px;
   color: var(--text-dim);
-  font-size: 0.92rem;
-  line-height: 1.45;
+  font-size: 0.78rem;
+  line-height: 1.35;
 }
 
 .finance-profit-card {
@@ -1417,11 +1420,12 @@ button {
 .journal-line input,
 .journal-line select,
 .opname-row input {
-  min-height: 44px;
+  min-height: 38px;
   border: 1px solid rgba(255, 209, 28, 0.18);
   background: rgba(0, 0, 0, 0.18);
   color: var(--text);
   font: inherit;
+  font-size: 0.82rem;
   outline: none;
 }
 
@@ -1430,7 +1434,7 @@ button {
 .accounting-form select,
 .journal-line input,
 .journal-line select {
-  padding: 0 12px;
+  padding: 0 10px;
 }
 
 .opname-select:focus,
@@ -1452,31 +1456,34 @@ button {
 .opname-head,
 .opname-row {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 110px 120px 120px 120px 110px;
-  gap: 14px;
+  grid-template-columns: minmax(180px, 1fr) 88px 96px 96px 90px 86px;
+  gap: 10px;
   align-items: center;
-  min-width: 860px;
-  padding: 14px;
+  min-width: 700px;
+  padding: 11px;
+  font-size: 0.82rem;
 }
 
 .coa-head,
 .coa-row {
   display: grid;
-  grid-template-columns: 120px minmax(260px, 1fr) 140px 140px;
-  gap: 14px;
+  grid-template-columns: 90px minmax(210px, 1fr) 105px 105px;
+  gap: 10px;
   align-items: center;
-  min-width: 680px;
-  padding: 14px;
+  min-width: 540px;
+  padding: 11px;
+  font-size: 0.82rem;
 }
 
 .journal-head,
 .journal-row {
   display: grid;
-  grid-template-columns: 160px 120px minmax(260px, 1fr) 150px 150px;
-  gap: 14px;
+  grid-template-columns: 132px 100px minmax(210px, 1fr) 120px 120px;
+  gap: 10px;
   align-items: center;
-  min-width: 840px;
-  padding: 14px;
+  min-width: 700px;
+  padding: 11px;
+  font-size: 0.82rem;
 }
 
 .opname-head,
@@ -1484,8 +1491,8 @@ button {
 .journal-head {
   background: rgba(4, 13, 26, 0.55);
   color: #dccda7;
-  font-size: 0.78rem;
-  letter-spacing: 0.14em;
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
 }
 
 .opname-row,
@@ -1499,6 +1506,14 @@ button {
 .coa-row strong,
 .journal-row strong {
   color: #f6f2dd;
+  overflow-wrap: anywhere;
+}
+
+.opname-row span,
+.coa-row span,
+.journal-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .opname-row input {
@@ -1507,10 +1522,11 @@ button {
 }
 
 .opname-button {
-  min-height: 42px;
+  min-height: 38px;
   border: 1px solid rgba(255, 209, 28, 0.34);
   background: rgba(255, 209, 28, 0.12);
   color: var(--yellow);
+  font-size: 0.78rem;
   font-weight: 800;
 }
 
@@ -1527,8 +1543,8 @@ button {
 
 .journal-line {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) 120px 120px;
-  gap: 10px;
+  grid-template-columns: minmax(150px, 1fr) 96px 96px;
+  gap: 8px;
 }
 
 .finance-statement-row {
@@ -1562,11 +1578,11 @@ button {
 
 .finance-net-row {
   margin-top: 16px;
-  padding: 18px;
+  padding: 14px;
   border: 1px solid rgba(85, 227, 139, 0.2);
   background: rgba(85, 227, 139, 0.08);
   color: #dfffea;
-  font-size: 1.02rem;
+  font-size: 0.88rem;
 }
 
 .finance-cashflow-list {
@@ -6146,6 +6162,10 @@ button {
     grid-template-columns: 1fr;
   }
 
+  .route-grid-accounting {
+    grid-template-columns: 1fr;
+  }
+
   .route-grid-timetable {
     grid-template-columns: 1fr;
   }
@@ -6265,6 +6285,7 @@ button {
   .route-grid-members,
   .route-grid-compliments,
   .route-grid-finance,
+  .route-grid-accounting,
   .route-grid-assistant,
   .route-grid-management,
   .route-grid-inventory,
@@ -6305,6 +6326,8 @@ button {
   .finance-statement-panel,
   .finance-side-panel,
   .finance-ledger-panel,
+  .accounting-form-panel,
+  .accounting-wide-panel,
   .inventory-panel,
   .inventory-main-panel,
   .inventory-side-panel,
@@ -6667,9 +6690,9 @@ button {
     bottom: 0;
     z-index: 50;
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 8px;
-    padding: 10px 12px 12px;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 6px;
+    padding: 8px 8px 10px;
     border-top: 1px solid rgba(255, 209, 28, 0.18);
     background: linear-gradient(180deg, rgba(8, 19, 34, 0.92), rgba(4, 14, 28, 0.98));
     box-shadow: 0 -16px 30px rgba(0, 0, 0, 0.4);
@@ -6679,20 +6702,22 @@ button {
   .mobile-bottom-nav-item {
     display: grid;
     place-items: center;
-    gap: 4px;
-    min-height: 62px;
+    gap: 3px;
+    min-height: 56px;
     border: 1px solid rgba(255, 209, 28, 0.08);
-    border-radius: 18px;
+    border-radius: 14px;
     background: rgba(255, 255, 255, 0.03);
     color: var(--text-dim);
     text-decoration: none;
-    font-size: 0.68rem;
-    letter-spacing: 0.06em;
+    font-size: 0.58rem;
+    letter-spacing: 0.02em;
+    line-height: 1.05;
+    overflow-wrap: anywhere;
   }
 
   .mobile-bottom-nav-item .nav-icon {
-    width: 20px;
-    height: 20px;
+    width: 18px;
+    height: 18px;
   }
 
   .mobile-bottom-nav-item.active {
