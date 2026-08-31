@@ -285,6 +285,15 @@ export const loadInventoryCatalog = async ({ limit = 100 } = {}) => {
   };
 };
 
+export const createInventoryItem = async (payload) => {
+  const result = await requestJson('/inventory', {
+    method: 'POST',
+    body: payload,
+  });
+
+  return result.data;
+};
+
 export const updateInventoryStockCount = async ({ itemId, systemQuantity, countedQuantity, branchName }) => {
   const change = Number(countedQuantity || 0) - Number(systemQuantity || 0);
   const result = await requestJson(`/inventory/${encodeURIComponent(String(itemId))}/adjust-stock`, {

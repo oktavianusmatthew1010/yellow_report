@@ -18,6 +18,7 @@ import {
   generateAiInsight,
   loadExecutiveDashboard,
   loadInventoryCatalog,
+  createInventoryItem,
   updateInventoryStockCount,
   loadAccountingSystem,
   createAccountingAccount,
@@ -4034,6 +4035,8 @@ function StockOpnameView({ dashboard }) {
   const [selectedBranchId, setSelectedBranchId] = useState('');
   const [state, setState] = useState({ items: [], loading: true, error: '', savingId: null, message: '' });
   const [counts, setCounts] = useState({});
+  const [itemForm, setItemForm] = useState({ itemName: '', itemCode: '', category: 'other', unit: 'pcs', quantity: '', minQuantity: '', unitCost: '' });
+  const [creatingItem, setCreatingItem] = useState(false);
   const selectedBranch = branches.find((branch) => String(getBranchStoreId(branch) ?? '') === selectedBranchId) || null;
 
   useEffect(() => {
@@ -4097,6 +4100,33 @@ function StockOpnameView({ dashboard }) {
     }
   };
 
+  const submitItem = async (event) => {
+    event.preventDefault();
+    setCreatingItem(true);
+    setState((current) => ({ ...current, error: '', message: '' }));
+
+    try {
+      const created = await createInventoryItem({
+        itemName: itemForm.itemName,
+        itemCode: itemForm.itemCode || undefined,
+        category: itemForm.category,
+        unit: itemForm.unit,
+        quantity: itemForm.quantity,
+        minQuantity: itemForm.minQuantity,
+        unitCost: itemForm.unitCost || undefined,
+        branchId: selectedBranchId || null,
+      });
+
+      setState((current) => ({ ...current, items: [...current.items, created], message: `${created.itemName || 'Item'} added.`, error: '' }));
+      setCounts((current) => ({ ...current, [created.id]: String(created.quantity ?? 0) }));
+      setItemForm({ itemName: '', itemCode: '', category: 'other', unit: 'pcs', quantity: '', minQuantity: '', unitCost: '' });
+    } catch (error) {
+      setState((current) => ({ ...current, error: error instanceof Error ? error.message : 'Failed to add item', message: '' }));
+    } finally {
+      setCreatingItem(false);
+    }
+  };
+
   return (
     <div className="route-grid route-grid-accounting">
       <section className="panel finance-hero-panel">
@@ -4121,6 +4151,22 @@ function StockOpnameView({ dashboard }) {
           <article className="finance-kpi-card"><div className="finance-kpi-label mono">VALUE VARIANCE</div><div className="finance-kpi-value">{formatRupiah(totalValueVariance)}</div><div className="finance-kpi-note">Based on unit cost</div></article>
           <article className="finance-kpi-card"><div className="finance-kpi-label mono">BRANCH</div><div className="finance-kpi-value">{selectedBranch ? (selectedBranch.code || selectedBranch.name) : 'ALL'}</div><div className="finance-kpi-note">{selectedBranch?.name || 'Company wide opname'}</div></article>
         </div>
+      </section>
+
+      <section className="panel accounting-form-panel">
+        <div className="panel-title">NEW ITEM</div>
+        <form className="accounting-form" onSubmit={submitItem}>
+          <input value={itemForm.itemName} onChange={(event) => setItemForm((current) => ({ ...current, itemName: event.target.value }))} placeholder="Item name" required />
+          <input value={itemForm.itemCode} onChange={(event) => setItemForm((current) => ({ ...current, itemCode: event.target.value }))} placeholder="Item code (optional)" />
+          <select value={itemForm.category} onChange={(event) => setItemForm((current) => ({ ...current, category: event.target.value }))}>
+            <option value="chemical">Chemical</option><option value="hardware">Hardware</option><option value="supply">Supply</option><option value="tool">Tool</option><option value="consumable">Consumable</option><option value="other">Other</option>
+          </select>
+          <input value={itemForm.unit} onChange={(event) => setItemForm((current) => ({ ...current, unit: event.target.value }))} placeholder="Unit (e.g. pcs, ltr)" />
+          <input type="number" min="0" value={itemForm.quantity} onChange={(event) => setItemForm((current) => ({ ...current, quantity: event.target.value }))} placeholder="Starting quantity" />
+          <input type="number" min="0" value={itemForm.minQuantity} onChange={(event) => setItemForm((current) => ({ ...current, minQuantity: event.target.value }))} placeholder="Min quantity" />
+          <input type="number" min="0" value={itemForm.unitCost} onChange={(event) => setItemForm((current) => ({ ...current, unitCost: event.target.value }))} placeholder="Unit cost (optional)" />
+          <button type="submit" className="opname-button" disabled={creatingItem}>{creatingItem ? 'Adding' : 'Add Item'}</button>
+        </form>
       </section>
 
       <section className="panel accounting-wide-panel">
