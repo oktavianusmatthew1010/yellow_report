@@ -4183,20 +4183,28 @@ function AccountingView({ dashboard }) {
 
   const submitAccount = async (event) => {
     event.preventDefault();
-    const account = await createAccountingAccount(accountForm);
-    setState((current) => ({ ...current, accounts: [...current.accounts, account].sort((a, b) => String(a.code).localeCompare(String(b.code))), message: 'Account created.', error: '' }));
-    setAccountForm({ code: '', name: '', type: 'asset' });
+    try {
+      const account = await createAccountingAccount(accountForm);
+      setState((current) => ({ ...current, accounts: [...current.accounts, account].sort((a, b) => String(a.code).localeCompare(String(b.code))), message: 'Account created.', error: '' }));
+      setAccountForm({ code: '', name: '', type: 'asset' });
+    } catch (error) {
+      setState((current) => ({ ...current, error: error instanceof Error ? error.message : 'Failed to create account', message: '' }));
+    }
   };
 
   const submitJournal = async (event) => {
     event.preventDefault();
-    const journal = await createAccountingJournal({
-      ...journalForm,
-      branchId: journalForm.branchId || null,
-      lines: journalForm.lines.map((line) => ({ ...line, accountName: accountMap.get(String(line.accountCode))?.name || '' })),
-    });
-    setState((current) => ({ ...current, journals: [journal, ...current.journals], message: 'Journal posted.', error: '' }));
-    setJournalForm((current) => ({ ...current, description: '', lines: current.lines.map((line) => ({ ...line, debit: '', credit: '' })) }));
+    try {
+      const journal = await createAccountingJournal({
+        ...journalForm,
+        branchId: journalForm.branchId || null,
+        lines: journalForm.lines.map((line) => ({ ...line, accountName: accountMap.get(String(line.accountCode))?.name || '' })),
+      });
+      setState((current) => ({ ...current, journals: [journal, ...current.journals], message: 'Journal posted.', error: '' }));
+      setJournalForm((current) => ({ ...current, description: '', lines: current.lines.map((line) => ({ ...line, debit: '', credit: '' })) }));
+    } catch (error) {
+      setState((current) => ({ ...current, error: error instanceof Error ? error.message : 'Failed to post journal', message: '' }));
+    }
   };
 
   return (
