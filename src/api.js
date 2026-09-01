@@ -393,6 +393,61 @@ export const loadStockTransfers = async ({ branchId } = {}) => {
   return Array.isArray(result?.data) ? result.data : [];
 };
 
+export const loadSuppliers = async ({ search, isActive } = {}) => {
+  const params = new URLSearchParams();
+  if (search) params.set('search', search);
+  if (isActive !== undefined) params.set('isActive', isActive);
+  const query = params.toString();
+  const result = await requestJson(`/suppliers${query ? `?${query}` : ''}`);
+
+  return Array.isArray(result?.data) ? result.data : [];
+};
+
+export const createSupplier = async (payload) => {
+  const result = await requestJson('/suppliers', {
+    method: 'POST',
+    body: payload,
+  });
+
+  return result.data;
+};
+
+export const loadPurchaseOrders = async ({ status, supplierId, branchId } = {}) => {
+  const params = new URLSearchParams();
+  if (status) params.set('status', status);
+  if (supplierId !== undefined && supplierId !== null && supplierId !== '') params.set('supplierId', supplierId);
+  if (branchId !== undefined && branchId !== null && branchId !== '') params.set('branchId', branchId);
+  const query = params.toString();
+  const result = await requestJson(`/purchase-orders${query ? `?${query}` : ''}`);
+
+  return Array.isArray(result?.data) ? result.data : [];
+};
+
+export const createPurchaseOrder = async (payload) => {
+  const result = await requestJson('/purchase-orders', {
+    method: 'POST',
+    body: payload,
+  });
+
+  return result.data;
+};
+
+export const receivePurchaseOrder = async (id) => {
+  const result = await requestJson(`/purchase-orders/${id}/receive`, {
+    method: 'POST',
+  });
+
+  return result.data;
+};
+
+export const cancelPurchaseOrder = async (id) => {
+  const result = await requestJson(`/purchase-orders/${id}/cancel`, {
+    method: 'POST',
+  });
+
+  return result.data;
+};
+
 export const loadSalaryScales = async () => {
   const result = await requestJson('/hr/salary-scales');
   return Array.isArray(result?.data) ? result.data : [];

@@ -29,6 +29,12 @@ import {
   addBranchStock,
   transferBranchStock,
   loadStockTransfers,
+  loadSuppliers,
+  createSupplier,
+  loadPurchaseOrders,
+  createPurchaseOrder,
+  receivePurchaseOrder,
+  cancelPurchaseOrder,
   loadMaintenanceAssets,
   loadAttendanceReport,
   loadSalaryScales,
@@ -69,6 +75,7 @@ const NAV_ITEMS = [
   { label: 'Inventory', icon: 'inventory', path: '/inventory' },
   { label: 'Stock Opname', icon: 'inventory', path: '/stock-opname' },
   { label: 'Branch Stock', icon: 'inventory', path: '/branch-stock' },
+  { label: 'Purchasing', icon: 'inventory', path: '/purchasing' },
   { label: 'Finance', icon: 'ledger', path: '/finance' },
   { label: 'Accounting', icon: 'ledger', path: '/accounting' },
   { label: 'Reports', icon: 'ledger', path: '/reports' },
@@ -4569,6 +4576,244 @@ function BranchStockView({ dashboard }) {
   );
 }
 
+function PurchasingView({ dashboard }) {
+  const branches = Array.isArray(dashboard?.branchLocations) ? dashboard.branchLocations : [];
+  const today = new Date().toISOString().slice(0, 10);
+  const [state, setState] = useState({ suppliers: [], orders: [], items: [], loading: true, error: '', message: '' });
+  const [supplierForm, setSupplierForm] = useState({ name: '', contactPerson: '', phone: '', email: '', address: '', notes: '' });
+  const [savingSupplier, setSavingSupplier] = useState(false);
+  const [poForm, setPoForm] = useState({
+    supplierId: '',
+    branchId: '',
+    orderDate: today,
+    expectedDate: '',
+    notes: '',
+    lines: [{ itemId: '', quantity: '', unitCost: '' }],
+  });
+  const [savingOrder, setSavingOrder] = useState(false);
+  const [workingOrderId, setWorkingOrderId] = useState(null);
+
+  const reloadAll = async () => {
+    const [suppliers, orders, items] = await Promise.all([loadSuppliers(), loadPurchaseOrders(), loadItemMaster()]);
+    setState({ suppliers, orders, items, loading: false, error: '', message: '' });
+  };
+
+  useEffect(() => {
+    reloadAll().catch((error) => setState((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : 'Failed to load purchasing data' })));
+  }, []);
+
+  const branchLabel = (branchId) => {
+    const branch = branches.find((item) => String(getBranchStoreId(item) ?? '') === String(branchId));
+    return branch ? (branch.code || branch.name) : `Branch ${branchId}`;
+  };
+
+  const pendingOrders = state.orders.filter((order) => order.status === 'pending');
+  const pendingValue = pendingOrders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
+  const poTotal = poForm.lines.reduce((sum, line) => sum + (Number(line.quantity || 0) * Number(line.unitCost || 0)), 0);
+
+  const updateLine = (index, patch) => {
+    setPoForm((current) => ({
+      ...current,
+      lines: current.lines.map((line, lineIndex) => (lineIndex === index ? { ...line, ...patch } : line)),
+    }));
+  };
+
+  const addLine = () => {
+    setPoForm((current) => ({ ...current, lines: [...current.lines, { itemId: '', quantity: '', unitCost: '' }] }));
+  };
+
+  const removeLine = (index) => {
+    setPoForm((current) => ({ ...current, lines: current.lines.filter((_, lineIndex) => lineIndex !== index) }));
+  };
+
+  const submitSupplier = async (event) => {
+    event.preventDefault();
+    setSavingSupplier(true);
+    try {
+      const supplier = await createSupplier(supplierForm);
+      setState((current) => ({
+        ...current,
+        suppliers: [...current.suppliers, supplier].sort((a, b) => String(a.name).localeCompare(String(b.name))),
+        message: `${supplier.name} added to supplier list.`,
+        error: '',
+      }));
+      setSupplierForm({ name: '', contactPerson: '', phone: '', email: '', address: '', notes: '' });
+    } catch (error) {
+      setState((current) => ({ ...current, error: error instanceof Error ? error.message : 'Failed to create supplier', message: '' }));
+    } finally {
+      setSavingSupplier(false);
+    }
+  };
+
+  const submitPurchaseOrder = async (event) => {
+    event.preventDefault();
+    setSavingOrder(true);
+    try {
+      const order = await createPurchaseOrder({
+        ...poForm,
+        expectedDate: poForm.expectedDate || null,
+        items: poForm.lines.map((line) => ({ itemId: line.itemId, quantity: line.quantity, unitCost: line.unitCost })),
+      });
+      setState((current) => ({ ...current, orders: [order, ...current.orders], message: `Purchase order ${order.poNumber} requested.`, error: '' }));
+      setPoForm({ supplierId: '', branchId: '', orderDate: today, expectedDate: '', notes: '', lines: [{ itemId: '', quantity: '', unitCost: '' }] });
+    } catch (error) {
+      setState((current) => ({ ...current, error: error instanceof Error ? error.message : 'Failed to create purchase order', message: '' }));
+    } finally {
+      setSavingOrder(false);
+    }
+  };
+
+  const handleReceive = async (orderId) => {
+    setWorkingOrderId(orderId);
+    try {
+      const order = await receivePurchaseOrder(orderId);
+      setState((current) => ({
+        ...current,
+        orders: current.orders.map((existing) => (existing.id === order.id ? order : existing)),
+        message: `Purchase order ${order.poNumber} marked as received. Stock updated.`,
+        error: '',
+      }));
+    } catch (error) {
+      setState((current) => ({ ...current, error: error instanceof Error ? error.message : 'Failed to receive purchase order', message: '' }));
+    } finally {
+      setWorkingOrderId(null);
+    }
+  };
+
+  const handleCancel = async (orderId) => {
+    setWorkingOrderId(orderId);
+    try {
+      const order = await cancelPurchaseOrder(orderId);
+      setState((current) => ({
+        ...current,
+        orders: current.orders.map((existing) => (existing.id === order.id ? order : existing)),
+        message: `Purchase order ${order.poNumber} cancelled.`,
+        error: '',
+      }));
+    } catch (error) {
+      setState((current) => ({ ...current, error: error instanceof Error ? error.message : 'Failed to cancel purchase order', message: '' }));
+    } finally {
+      setWorkingOrderId(null);
+    }
+  };
+
+  return (
+    <div className="route-grid route-grid-accounting">
+      <section className="panel finance-hero-panel">
+        <div className="panel-head">
+          <div>
+            <div className="panel-title finance-panel-title">PURCHASING</div>
+            <div className="panel-subtitle mono">SUPPLIER LIST • PURCHASE ORDER REQUESTS</div>
+          </div>
+        </div>
+
+        <div className="finance-kpi-grid">
+          <article className="finance-kpi-card"><div className="finance-kpi-label mono">SUPPLIERS</div><div className="finance-kpi-value">{state.suppliers.length}</div><div className="finance-kpi-note">Active suppliers</div></article>
+          <article className="finance-kpi-card"><div className="finance-kpi-label mono">PURCHASE ORDERS</div><div className="finance-kpi-value">{state.orders.length}</div><div className="finance-kpi-note">All time</div></article>
+          <article className="finance-kpi-card"><div className="finance-kpi-label mono">PENDING PO</div><div className="finance-kpi-value">{pendingOrders.length}</div><div className="finance-kpi-note">Awaiting receipt</div></article>
+          <article className="finance-kpi-card"><div className="finance-kpi-label mono">PENDING VALUE</div><div className="finance-kpi-value">{formatRupiah(pendingValue)}</div><div className="finance-kpi-note">Not yet received</div></article>
+        </div>
+
+        {state.loading ? <div className="finance-empty mono">LOADING PURCHASING DATA...</div> : null}
+        {state.error ? <div className="finance-empty mono">{state.error}</div> : null}
+        {state.message ? <div className="finance-empty mono">{state.message}</div> : null}
+      </section>
+
+      <section className="panel accounting-form-panel">
+        <div className="panel-title">NEW SUPPLIER</div>
+        <form className="accounting-form" onSubmit={submitSupplier}>
+          <input value={supplierForm.name} onChange={(event) => setSupplierForm((current) => ({ ...current, name: event.target.value }))} placeholder="Supplier name" required />
+          <input value={supplierForm.contactPerson} onChange={(event) => setSupplierForm((current) => ({ ...current, contactPerson: event.target.value }))} placeholder="Contact person" />
+          <input value={supplierForm.phone} onChange={(event) => setSupplierForm((current) => ({ ...current, phone: event.target.value }))} placeholder="Phone" />
+          <input type="email" value={supplierForm.email} onChange={(event) => setSupplierForm((current) => ({ ...current, email: event.target.value }))} placeholder="Email (optional)" />
+          <input value={supplierForm.address} onChange={(event) => setSupplierForm((current) => ({ ...current, address: event.target.value }))} placeholder="Address (optional)" />
+          <button type="submit" className="opname-button" disabled={savingSupplier}>{savingSupplier ? 'Saving' : 'Add Supplier'}</button>
+        </form>
+      </section>
+
+      <section className="panel accounting-form-panel">
+        <div className="panel-title">REQUEST PURCHASE ORDER</div>
+        <form className="accounting-form" onSubmit={submitPurchaseOrder}>
+          <select value={poForm.supplierId} onChange={(event) => setPoForm((current) => ({ ...current, supplierId: event.target.value }))} required>
+            <option value="">Select supplier</option>
+            {state.suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
+          </select>
+          <select value={poForm.branchId} onChange={(event) => setPoForm((current) => ({ ...current, branchId: event.target.value }))} required>
+            <option value="">Select branch</option>
+            {branches.map((branch, index) => (
+              <option key={getBranchStoreId(branch) ?? index} value={getBranchStoreId(branch) ?? ''}>
+                {branch.name || branch.code || `Branch ${index + 1}`}
+              </option>
+            ))}
+          </select>
+          <input type="date" value={poForm.orderDate} onChange={(event) => setPoForm((current) => ({ ...current, orderDate: event.target.value }))} required />
+          <input type="date" value={poForm.expectedDate} onChange={(event) => setPoForm((current) => ({ ...current, expectedDate: event.target.value }))} placeholder="Expected date (optional)" />
+
+          {poForm.lines.map((line, index) => (
+            <div className="po-line" key={`po-line-${index}`}>
+              <select value={line.itemId} onChange={(event) => updateLine(index, { itemId: event.target.value })} required>
+                <option value="">Select item</option>
+                {state.items.map((item) => <option key={item.id} value={item.id}>{item.itemCode} - {item.itemName}</option>)}
+              </select>
+              <input type="number" min="1" value={line.quantity} onChange={(event) => updateLine(index, { quantity: event.target.value })} placeholder="Qty" required />
+              <input type="number" min="0" value={line.unitCost} onChange={(event) => updateLine(index, { unitCost: event.target.value })} placeholder="Unit cost" required />
+              <button type="button" className="po-line-remove" onClick={() => removeLine(index)} disabled={poForm.lines.length <= 1}>✕</button>
+            </div>
+          ))}
+          <button type="button" className="opname-button" onClick={addLine}>+ Add Item</button>
+
+          <input value={poForm.notes} onChange={(event) => setPoForm((current) => ({ ...current, notes: event.target.value }))} placeholder="Notes (optional)" />
+
+          <div className="finance-net-row"><span>Total</span><strong>{formatRupiah(poTotal)}</strong></div>
+          <button type="submit" className="opname-button" disabled={savingOrder}>{savingOrder ? 'Requesting' : 'Request PO'}</button>
+        </form>
+      </section>
+
+      <section className="panel accounting-wide-panel">
+        <div className="panel-title">SUPPLIER LIST</div>
+        <div className="opname-table">
+          <div className="supplier-head mono"><span>Name</span><span>Contact</span><span>Phone</span><span>Email</span></div>
+          {state.suppliers.map((supplier) => (
+            <div key={supplier.id} className="supplier-row">
+              <strong>{supplier.name}</strong>
+              <span>{supplier.contactPerson || '-'}</span>
+              <span>{supplier.phone || '-'}</span>
+              <span>{supplier.email || '-'}</span>
+            </div>
+          ))}
+          {!state.suppliers.length ? <div className="finance-empty mono">NO SUPPLIERS YET.</div> : null}
+        </div>
+      </section>
+
+      <section className="panel accounting-wide-panel">
+        <div className="panel-title">PURCHASE ORDERS</div>
+        <div className="opname-table">
+          <div className="po-head mono"><span>PO No</span><span>Supplier</span><span>Branch</span><span>Items</span><span>Total</span><span>Status</span><span>Action</span></div>
+          {state.orders.map((order) => (
+            <div key={order.id} className="po-row">
+              <strong>{order.poNumber}</strong>
+              <span>{order.supplier?.name || '-'}</span>
+              <span>{branchLabel(order.branchId)}</span>
+              <span>{order.items?.length || 0} line(s)</span>
+              <span>{formatRupiah(order.totalAmount)}</span>
+              <span className={order.status === 'received' ? 'finance-tone-good' : order.status === 'cancelled' ? 'finance-tone-bad' : 'finance-tone-warn'}>{order.status}</span>
+              <span className="po-actions">
+                {order.status === 'pending' ? (
+                  <>
+                    <button type="button" className="opname-button" disabled={workingOrderId === order.id} onClick={() => handleReceive(order.id)}>Receive</button>
+                    <button type="button" className="po-line-remove" disabled={workingOrderId === order.id} onClick={() => handleCancel(order.id)}>Cancel</button>
+                  </>
+                ) : '-'}
+              </span>
+            </div>
+          ))}
+          {!state.orders.length ? <div className="finance-empty mono">NO PURCHASE ORDERS YET.</div> : null}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function LoyaltyVoucherView() {
   const [state, setState] = useState({ vouchers: [], services: [], loading: true, error: '', message: '' });
   const [form, setForm] = useState({
@@ -6634,6 +6879,7 @@ function DashboardContent({ session, onLogout }) {
           <Route path="/inventory" element={<InventoryView dashboard={dashboard} />} />
           <Route path="/stock-opname" element={<StockOpnameView dashboard={dashboard} />} />
           <Route path="/branch-stock" element={<BranchStockView dashboard={dashboard} />} />
+          <Route path="/purchasing" element={<PurchasingView dashboard={dashboard} />} />
           <Route path="/finance" element={<FinanceView dashboard={dashboard} />} />
           <Route path="/accounting" element={<AccountingView dashboard={dashboard} />} />
           <Route path="/reports" element={<ReportsView dashboard={dashboard} />} />

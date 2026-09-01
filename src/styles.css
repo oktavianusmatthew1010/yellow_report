@@ -1519,12 +1519,36 @@ button {
   font-size: 0.82rem;
 }
 
+.supplier-head,
+.supplier-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 160px 130px 200px;
+  gap: 10px;
+  align-items: center;
+  min-width: 700px;
+  padding: 11px;
+  font-size: 0.82rem;
+}
+
+.po-head,
+.po-row {
+  display: grid;
+  grid-template-columns: 150px minmax(160px, 1fr) 120px 100px 130px 100px 170px;
+  gap: 10px;
+  align-items: center;
+  min-width: 900px;
+  padding: 11px;
+  font-size: 0.82rem;
+}
+
 .opname-head,
 .coa-head,
 .journal-head,
 .item-head,
 .stock-head,
-.transfer-head {
+.transfer-head,
+.supplier-head,
+.po-head {
   background: rgba(4, 13, 26, 0.55);
   color: #dccda7;
   font-size: 0.66rem;
@@ -1536,7 +1560,9 @@ button {
 .journal-row,
 .item-row,
 .stock-row,
-.transfer-row {
+.transfer-row,
+.supplier-row,
+.po-row {
   border-top: 1px solid rgba(255, 209, 28, 0.1);
   color: var(--text-dim);
 }
@@ -1546,7 +1572,9 @@ button {
 .journal-row strong,
 .item-row strong,
 .stock-row strong,
-.transfer-row strong {
+.transfer-row strong,
+.supplier-row strong,
+.po-row strong {
   color: #f6f2dd;
   overflow-wrap: anywhere;
 }
@@ -1556,9 +1584,44 @@ button {
 .journal-row span,
 .item-row span,
 .stock-row span,
-.transfer-row span {
+.transfer-row span,
+.supplier-row span,
+.po-row span {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.po-line {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) 90px 110px 36px;
+  gap: 8px;
+  align-items: center;
+}
+
+.po-line-remove {
+  min-height: 34px;
+  border: 1px solid rgba(217, 61, 61, 0.4);
+  background: rgba(217, 61, 61, 0.12);
+  color: var(--red);
+  font-size: 0.78rem;
+  font-weight: 800;
+  border-radius: 6px;
+}
+
+.po-line-remove:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.po-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.po-actions .opname-button {
+  min-height: 30px;
+  padding: 0 10px;
 }
 
 .opname-row input {
@@ -1679,6 +1742,10 @@ button {
 
 .finance-tone-warn {
   color: #f7d476 !important;
+}
+
+.finance-tone-bad {
+  color: var(--red) !important;
 }
 
 .finance-tone-blue {
