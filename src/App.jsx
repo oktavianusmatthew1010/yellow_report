@@ -566,6 +566,22 @@ const getMemberStatusTone = (status = '') => {
   return 'bad';
 };
 
+const LOYALTY_TIER_THRESHOLDS = [100, 500, 1000];
+
+const getLoyaltyProgress = (points = 0) => {
+  const value = Number(points || 0);
+  const nextThreshold = LOYALTY_TIER_THRESHOLDS.find((threshold) => value < threshold);
+
+  if (!nextThreshold) {
+    return { percent: 100, pointsToNext: 0 };
+  }
+
+  const previousThreshold = LOYALTY_TIER_THRESHOLDS[LOYALTY_TIER_THRESHOLDS.indexOf(nextThreshold) - 1] || 0;
+  const percent = ((value - previousThreshold) / (nextThreshold - previousThreshold)) * 100;
+
+  return { percent: Math.max(0, Math.min(100, percent)), pointsToNext: nextThreshold - value };
+};
+
 const getMemberInitials = (member = {}) => {
   const parts = String(member.name || '')
     .trim()
@@ -2634,80 +2650,97 @@ function InventoryView({ dashboard }) {
   );
 }
 
-function MembersView({ dashboard }) {
+function MembersView() {
   const navigate = useNavigate();
   const { memberId } = useParams();
   const [memberQuery, setMemberQuery] = useState('');
   const [tierFilter, setTierFilter] = useState('all');
-  const normalizedQuery = memberQuery.trim().toLowerCase();
   const isDetailView = Boolean(memberId);
-  const selectedMember = useMemo(
-    () => MEMBER_DIRECTORY.find((member) => String(member.id) === String(memberId ?? '')) || MEMBER_DIRECTORY[0],
-    [memberId]
-  );
 
-  const filteredMembers = useMemo(() => {
-    return MEMBER_DIRECTORY.filter((member) => {
-      if (tierFilter !== 'all' && String(member.tier).toLowerCase() !== tierFilter) {
-        return false;
-      }
+  const [state, setState] = useState({ members: [], summary: {}, loading: true, error: '', message: '' });
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [addForm, setAddForm] = useState({ name: '', phone: '', email: '', licensePlate: '', make: '', model: '', year: '', color: '', notes: '' });
+  const [savingMember, setSavingMember] = useState(false);
 
-      if (!normalizedQuery) {
-        return true;
-      }
+  const [detail, setDetail] = useState({ member: null, recentVisits: [], stats: {}, loading: true, error: '' });
 
-      return [
-        member.id,
-        member.name,
-        member.tier,
-        member.plate,
-        member.vehicle,
-        member.color,
-        member.status,
-        member.phone,
-        member.email,
-        member.bay,
-      ]
-        .join(' ')
-        .toLowerCase()
-        .includes(normalizedQuery);
-    });
-  }, [normalizedQuery, tierFilter]);
+  const reloadMembers = async () => {
+    setState((current) => ({ ...current, loading: true }));
+    try {
+      const result = await loadMembers({ search: memberQuery, tier: tierFilter });
+      setState({ members: result.members || [], summary: result.summary || {}, loading: false, error: '', message: '' });
+    } catch (error) {
+      setState((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : 'Failed to load members' }));
+    }
+  };
 
-  const visibleMembers = filteredMembers.slice(0, 4);
+  useEffect(() => {
+    if (isDetailView) return undefined;
+    let cancelled = false;
+    setState((current) => ({ ...current, loading: true }));
+    loadMembers({ search: memberQuery, tier: tierFilter })
+      .then((result) => {
+        if (cancelled) return;
+        setState({ members: result.members || [], summary: result.summary || {}, loading: false, error: '', message: '' });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setState((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : 'Failed to load members' }));
+      });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tierFilter, isDetailView]);
+
+  useEffect(() => {
+    if (!isDetailView) return undefined;
+    let cancelled = false;
+    setDetail((current) => ({ ...current, loading: true, error: '' }));
+    loadMemberDetail(memberId)
+      .then((result) => {
+        if (cancelled) return;
+        setDetail({ member: result.member, recentVisits: result.recentVisits || [], stats: result.stats || {}, loading: false, error: '' });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setDetail({ member: null, recentVisits: [], stats: {}, loading: false, error: error instanceof Error ? error.message : 'Failed to load member' });
+      });
+    return () => { cancelled = true; };
+  }, [memberId, isDetailView]);
+
+  const visibleMembers = state.members;
   const membersStats = [
     {
       label: 'TOTAL MEMBERS',
-      value: String(MEMBER_DIRECTORY_TOTAL).replace(/\B(?=(\d{3})+(?!\d))/g, ','),
-      subtext: '+12% VS LAST MONTH',
-      bar: 74,
+      value: String(state.summary.total || 0),
+      subtext: `${state.summary.active || 0} ACTIVE`,
+      bar: state.summary.total ? Math.round(((state.summary.active || 0) / state.summary.total) * 100) : 0,
       tone: 'sand',
     },
     {
-      label: 'ELITE TIER RATIO',
-      value: '42%',
+      label: 'ELITE MEMBERS',
+      value: String(state.summary.elite || 0),
       subtext: 'HIGH PERFORMANCE',
-      bar: 42,
+      bar: state.summary.total ? Math.round(((state.summary.elite || 0) / state.summary.total) * 100) : 0,
       tone: 'blue',
     },
     {
-      label: 'AVG. MONTHLY WASHES',
-      value: '3.8',
-      subtext: 'PER ACTIVE MEMBER',
-      bar: 61,
+      label: 'PRO MEMBERS',
+      value: String(state.summary.pro || 0),
+      subtext: 'MID TIER',
+      bar: state.summary.total ? Math.round(((state.summary.pro || 0) / state.summary.total) * 100) : 0,
       tone: 'green',
     },
     {
-      label: 'EXPIRING SOON',
-      value: '24',
-      subtext: 'REQUIRES ACTION',
-      bar: 24,
+      label: 'INACTIVE',
+      value: String(state.summary.inactive || 0),
+      subtext: 'REQUIRES OUTREACH',
+      bar: state.summary.total ? Math.round(((state.summary.inactive || 0) / state.summary.total) * 100) : 0,
       tone: 'bad',
     },
   ];
-  const visibleSummary = normalizedQuery || tierFilter !== 'all'
-    ? `${visibleMembers.length} MATCHES OF ${filteredMembers.length} FILTERED MEMBERS`
-    : `1-${Math.min(visibleMembers.length, 4)} OF ${MEMBER_DIRECTORY_TOTAL} MEMBERS`;
+  const visibleSummary = memberQuery || tierFilter !== 'all'
+    ? `${visibleMembers.length} MATCHES`
+    : `${visibleMembers.length} OF ${state.summary.total || 0} MEMBERS`;
   const lastUpdated = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
   const handleOpenMember = (member) => {
@@ -2715,27 +2748,72 @@ function MembersView({ dashboard }) {
   };
 
   const handleSearchKeyDown = (event) => {
-    if (event.key !== 'Enter') {
-      return;
+    if (event.key === 'Enter') {
+      reloadMembers();
     }
+  };
 
-    if (!normalizedQuery) {
-      return;
-    }
+  const submitAddMember = async (event) => {
+    event.preventDefault();
+    setSavingMember(true);
+    try {
+      const vehicles = addForm.licensePlate
+        ? [{
+            licensePlate: addForm.licensePlate,
+            make: addForm.make,
+            model: addForm.model,
+            year: addForm.year ? Number(addForm.year) : undefined,
+            color: addForm.color,
+          }]
+        : [];
 
-    const match = MEMBER_DIRECTORY.find((member) => (
-      String(member.id).includes(normalizedQuery)
-      || String(member.name).toLowerCase().includes(normalizedQuery)
-      || String(member.plate).toLowerCase().includes(normalizedQuery)
-    ));
+      await createMember({
+        name: addForm.name,
+        phone: addForm.phone,
+        email: addForm.email || undefined,
+        notes: addForm.notes || undefined,
+        vehicles,
+      });
 
-    if (match) {
-      navigate(`/members/${match.id}`);
+      setShowAddForm(false);
+      setAddForm({ name: '', phone: '', email: '', licensePlate: '', make: '', model: '', year: '', color: '', notes: '' });
+      setState((current) => ({ ...current, message: `${addForm.name} added.`, error: '' }));
+      reloadMembers();
+    } catch (error) {
+      setState((current) => ({ ...current, error: error instanceof Error ? error.message : 'Failed to add member' }));
+    } finally {
+      setSavingMember(false);
     }
   };
 
   if (isDetailView) {
-    const totalLogCost = selectedMember.recentVisits.reduce((sum, visit) => sum + Number(visit.cost || 0), 0);
+    if (detail.loading) {
+      return (
+        <div className="route-grid route-grid-members members-view members-view-detail">
+          <section className="panel members-detail-panel">
+            <div className="finance-empty mono">LOADING MEMBER...</div>
+          </section>
+        </div>
+      );
+    }
+
+    if (detail.error || !detail.member) {
+      return (
+        <div className="route-grid route-grid-members members-view members-view-detail">
+          <section className="panel members-detail-panel">
+            <div className="finance-empty mono">{detail.error || 'Member not found.'}</div>
+            <button type="button" className="members-back-btn" onClick={() => navigate('/members')}>
+              SHOW DIRECTORY
+            </button>
+          </section>
+        </div>
+      );
+    }
+
+    const selectedMember = detail.member;
+    const stats = detail.stats || {};
+    const recentVisits = detail.recentVisits || [];
+    const totalLogCost = recentVisits.reduce((sum, visit) => sum + Number(visit.cost || 0), 0);
 
     return (
       <div className="route-grid route-grid-members members-view members-view-detail">
@@ -2827,7 +2905,7 @@ function MembersView({ dashboard }) {
                     <div className="panel-title">WASH LOG RECENT</div>
                     <div className="panel-subtitle mono">LATEST VISIT HISTORY</div>
                   </div>
-                  <div className="member-log-meta mono">{selectedMember.recentVisits.length} RECORDS</div>
+                  <div className="member-log-meta mono">{recentVisits.length} RECORDS</div>
                 </div>
 
                 <div className="member-log-table">
@@ -2838,16 +2916,16 @@ function MembersView({ dashboard }) {
                     <span>COST</span>
                   </div>
 
-                  {selectedMember.recentVisits.map((visit) => (
+                  {recentVisits.length ? recentVisits.map((visit) => (
                     <div key={`${selectedMember.id}-${visit.date}-${visit.package}`} className="member-log-row">
                       <span className="member-log-date mono">{formatMemberDateTime(visit.date)}</span>
                       <span className="member-log-package mono">{visit.package}</span>
                       <span className="member-log-result mono">{visit.result}</span>
                       <span className="member-log-cost mono">
-                        {visit.cost > 0 ? formatRupiah(visit.cost) : 'Rp0 (SUB)'}
+                        {visit.cost > 0 ? formatRupiah(visit.cost) : 'Rp0'}
                       </span>
                     </div>
-                  ))}
+                  )) : <div className="members-empty mono">NO VISITS RECORDED YET.</div>}
                 </div>
 
                 <div className="member-log-footer mono">
@@ -2864,20 +2942,22 @@ function MembersView({ dashboard }) {
                 </div>
 
                 <div className="member-status-tier">{selectedMember.tier}</div>
-                <div className="member-status-subtitle">{selectedMember.tier === 'ELITE' ? 'Annual Executive Tier' : selectedMember.tier === 'PRO' ? 'Monthly Pro Tier' : 'Basic Access Tier'}</div>
+                <div className="member-status-subtitle">{selectedMember.tier === 'ELITE' ? 'Elite Tier' : selectedMember.tier === 'PRO' ? 'Pro Tier' : 'Basic Tier'}</div>
 
                 <div className="member-status-box mono">
                   <div className="member-status-box-row">
-                    <span>Next Billing</span>
-                    <strong>{formatMemberDate(selectedMember.nextBilling)}</strong>
+                    <span>Total Spent</span>
+                    <strong>{formatRupiah(stats.totalSpent || 0)}</strong>
                   </div>
                   <div className="member-status-box-row">
-                    <span>Amount Due</span>
-                    <strong>{selectedMember.amountDue > 0 ? formatRupiah(selectedMember.amountDue) : 'PAID'}</strong>
+                    <span>Total Services</span>
+                    <strong>{stats.totalServices || 0}</strong>
+                  </div>
+                  <div className="member-status-box-row">
+                    <span>Last Visit</span>
+                    <strong>{stats.lastServiceDate ? formatMemberDate(stats.lastServiceDate) : '-'}</strong>
                   </div>
                 </div>
-
-                <button type="button" className="member-subscription-btn">MANAGE SUBSCRIPTION</button>
               </section>
 
               <section className="panel member-loyalty-panel">
@@ -2886,29 +2966,33 @@ function MembersView({ dashboard }) {
                   <div className="panel-meta mono">AVAILABLE POINTS</div>
                 </div>
 
-                <div className="member-points">{selectedMember.points.toLocaleString('en-US')}</div>
+                <div className="member-points">{Number(selectedMember.points || 0).toLocaleString('en-US')}</div>
                 <div className="member-progress" aria-hidden="true">
                   {Array.from({ length: 10 }).map((_, index) => (
                     <span
                       key={`${selectedMember.id}-point-${index}`}
-                      className={index < Math.round(selectedMember.loyaltyProgress / 10) ? 'member-progress-active' : ''}
+                      className={index < Math.round(getLoyaltyProgress(selectedMember.points).percent / 10) ? 'member-progress-active' : ''}
                     />
                   ))}
                 </div>
-                <div className="member-progress-copy mono">180 POINTS TO NEXT TIER REWARD</div>
+                <div className="member-progress-copy mono">
+                  {getLoyaltyProgress(selectedMember.points).pointsToNext > 0
+                    ? `${getLoyaltyProgress(selectedMember.points).pointsToNext} POINTS TO NEXT TIER`
+                    : 'TOP TIER REACHED'}
+                </div>
               </section>
 
-              <section className="panel member-alert-panel">
-                <div className="member-alert-head">
-                  <div className="member-alert-icon">!</div>
-                  <div className="member-alert-title">SYSTEM ALERT</div>
-                </div>
-                <p className="member-alert-copy">
-                  {selectedMember.statusTone === 'expired'
-                    ? 'This membership is expired. A renewal prompt should be sent before the next wash visit.'
-                    : `Card on file for ${selectedMember.name} expires in 14 days. Immediate update required to avoid service interruption.`}
-                </p>
-              </section>
+              {selectedMember.status !== 'ACTIVE' ? (
+                <section className="panel member-alert-panel">
+                  <div className="member-alert-head">
+                    <div className="member-alert-icon">!</div>
+                    <div className="member-alert-title">SYSTEM ALERT</div>
+                  </div>
+                  <p className="member-alert-copy">
+                    {`${selectedMember.name} has been inactive. Consider a re-engagement offer before their next expected visit.`}
+                  </p>
+                </section>
+              ) : null}
             </aside>
           </div>
         </section>
@@ -2937,12 +3021,30 @@ function MembersView({ dashboard }) {
               />
             </label>
 
-            <button type="button" className="members-add-btn">
+            <button type="button" className="members-add-btn" onClick={() => setShowAddForm((current) => !current)}>
               <span>+</span>
-              <strong>ADD NEW MEMBER</strong>
+              <strong>{showAddForm ? 'CANCEL' : 'ADD NEW MEMBER'}</strong>
             </button>
           </div>
         </div>
+
+        {state.error ? <div className="finance-empty mono">{state.error}</div> : null}
+        {state.message ? <div className="finance-empty mono">{state.message}</div> : null}
+
+        {showAddForm ? (
+          <form className="accounting-form" onSubmit={submitAddMember}>
+            <input value={addForm.name} onChange={(event) => setAddForm((current) => ({ ...current, name: event.target.value }))} placeholder="Full name" required />
+            <input value={addForm.phone} onChange={(event) => setAddForm((current) => ({ ...current, phone: event.target.value }))} placeholder="Phone number" required />
+            <input value={addForm.email} onChange={(event) => setAddForm((current) => ({ ...current, email: event.target.value }))} placeholder="Email (optional)" type="email" />
+            <input value={addForm.licensePlate} onChange={(event) => setAddForm((current) => ({ ...current, licensePlate: event.target.value }))} placeholder="License plate (optional)" />
+            <input value={addForm.make} onChange={(event) => setAddForm((current) => ({ ...current, make: event.target.value }))} placeholder="Vehicle make" />
+            <input value={addForm.model} onChange={(event) => setAddForm((current) => ({ ...current, model: event.target.value }))} placeholder="Vehicle model" />
+            <input value={addForm.year} onChange={(event) => setAddForm((current) => ({ ...current, year: event.target.value }))} placeholder="Vehicle year" type="number" />
+            <input value={addForm.color} onChange={(event) => setAddForm((current) => ({ ...current, color: event.target.value }))} placeholder="Vehicle color" />
+            <input value={addForm.notes} onChange={(event) => setAddForm((current) => ({ ...current, notes: event.target.value }))} placeholder="Notes (optional)" />
+            <button type="submit" className="opname-button" disabled={savingMember}>{savingMember ? 'Saving' : 'Save Member'}</button>
+          </form>
+        ) : null}
 
         <div className="members-filter-row">
           <div className="members-tier-tabs">
@@ -3004,8 +3106,8 @@ function MembersView({ dashboard }) {
                   <div className="members-table-plate mono">{member.plate}</div>
 
                   <div className="members-table-visit mono">
-                    <strong>{formatMemberDate(member.lastVisit)}</strong>
-                    <span>{formatMemberDateTime(member.lastVisit).split(' ').slice(1).join(' ')} • {member.bay}</span>
+                    <strong>{member.lastVisit ? formatMemberDate(member.lastVisit) : 'NEVER'}</strong>
+                    <span>{member.vehicle || ''}</span>
                   </div>
 
                   <div>

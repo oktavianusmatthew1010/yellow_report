@@ -773,6 +773,31 @@ export const createComplimentVoucher = async ({
   });
 };
 
+export const loadMembers = async ({ search = '', tier = 'all', status = 'all', page = 1, limit = 20 } = {}) => {
+  const query = new URLSearchParams({ page: String(page), limit: String(limit), tier, status });
+  if (search && search.trim()) query.set('search', search.trim());
+
+  return requestJson(`/customers/members?${query.toString()}`);
+};
+
+export const loadMemberDetail = async (id) => {
+  return requestJson(`/customers/members/${encodeURIComponent(String(id))}`);
+};
+
+export const createMember = async (payload) => {
+  return requestJson('/customers', {
+    method: 'POST',
+    body: payload,
+  });
+};
+
+export const recordLoyaltyTransaction = async (id, payload) => {
+  return requestJson(`/customers/${encodeURIComponent(String(id))}/loyalty`, {
+    method: 'POST',
+    body: payload,
+  });
+};
+
 const hourBuckets = [
   { label: '08:00', hour: 8 },
   { label: '10:00', hour: 10 },
