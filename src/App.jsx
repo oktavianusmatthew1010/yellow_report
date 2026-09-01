@@ -37,7 +37,7 @@ import {
   cancelPurchaseOrder,
   loadMaintenanceAssets,
   loadAttendanceReport,
-  loadAttendanceReportForLocation,
+  loadAttendanceReportForPeriod,
   loadSalaryScales,
   createSalaryScale,
   loadSalaryAssignments,
@@ -5353,16 +5353,12 @@ function HRISView() {
       today.setHours(0, 0, 0, 0);
 
       const assignedStaff = state.staff.filter((person) => assignmentByStaffId.get(person.id));
-      const locationIds = [...new Set(assignedStaff.map((person) => person.location?.id).filter((id) => id != null))];
 
-      const reportBatches = await Promise.all(
-        (locationIds.length ? locationIds : ['17526']).map((locationId) => loadAttendanceReportForLocation({
-          locationId,
-          startDate: toYmd(monthStart),
-          endDate: toYmd(monthEnd),
-        }))
-      );
-      const presenceMap = buildDailyPresenceMap(reportBatches.flat());
+      const reportEntries = await loadAttendanceReportForPeriod({
+        startDate: toYmd(monthStart),
+        endDate: toYmd(monthEnd),
+      });
+      const presenceMap = buildDailyPresenceMap(reportEntries);
 
       const rows = assignedStaff.map((person) => {
         const assignment = assignmentByStaffId.get(person.id);
