@@ -491,6 +491,21 @@ export const redeemLoyaltyVoucher = async (id) => {
   return result.data;
 };
 
+export const loadDailyTargets = async ({ branchId } = {}) => {
+  const query = branchId !== undefined && branchId !== null && branchId !== '' ? `?branchId=${encodeURIComponent(String(branchId))}` : '';
+  const result = await requestJson(`/daily-targets${query}`);
+  return Array.isArray(result?.data) ? result.data : [];
+};
+
+export const saveDailyTarget = async (id, targetCount) => {
+  const result = await requestJson(`/daily-targets/${encodeURIComponent(String(id))}`, {
+    method: 'PUT',
+    body: { targetCount },
+  });
+
+  return result.data;
+};
+
 export const loadMaintenanceAssets = async () => {
   const result = await requestJson('/maintenance/assets');
   return Array.isArray(result?.data) ? result.data : [];

@@ -44,6 +44,8 @@ import {
   loadLoyaltyVouchers,
   createLoyaltyVoucher,
   redeemLoyaltyVoucher,
+  loadDailyTargets,
+  saveDailyTarget,
 } from './api';
 import { exportRowsToExcel, exportRowsToPdf } from './reportExport';
 
@@ -4717,13 +4719,20 @@ function LoyaltyVoucherView() {
   );
 }
 
-function SettingsView() {
+function SettingsView({ dashboard }) {
+  const branches = Array.isArray(dashboard?.branchLocations) ? dashboard.branchLocations : [];
   const [providers, setProviders] = useState([]);
   const [forms, setForms] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [savingProvider, setSavingProvider] = useState(null);
+
+  const [targetBranchId, setTargetBranchId] = useState('');
+  const [targets, setTargets] = useState([]);
+  const [targetsLoading, setTargetsLoading] = useState(false);
+  const [savingTargetId, setSavingTargetId] = useState(null);
+  const [targetDrafts, setTargetDrafts] = useState({});
 
   const reload = async () => {
     setLoading(true);
@@ -4774,6 +4783,50 @@ function SettingsView() {
       setError(err instanceof Error ? err.message : 'Failed to save payment settings');
     } finally {
       setSavingProvider(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!targetBranchId) {
+      setTargets([]);
+      setTargetDrafts({});
+      return;
+    }
+
+    let cancelled = false;
+    setTargetsLoading(true);
+    loadDailyTargets({ branchId: targetBranchId })
+      .then((data) => {
+        if (cancelled) return;
+        setTargets(data);
+        setTargetDrafts(Object.fromEntries(data.map((item) => [item.id, String(item.targetCount)])));
+        setTargetsLoading(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : 'Failed to load daily targets');
+        setTargetsLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [targetBranchId]);
+
+  const submitTarget = async (target) => {
+    setSavingTargetId(target.id);
+    try {
+      const targetCount = Number(targetDrafts[target.id]);
+      if (!Number.isFinite(targetCount) || targetCount < 0) {
+        throw new Error('Target must be 0 or greater');
+      }
+
+      const updated = await saveDailyTarget(target.id, targetCount);
+      setTargets((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setMessage(`${updated.serviceLabel} target saved.`);
+      setError('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save daily target');
+    } finally {
+      setSavingTargetId(null);
     }
   };
 
@@ -4844,6 +4897,60 @@ function SettingsView() {
           </section>
         );
       })}
+
+      <section className="panel accounting-wide-panel">
+        <div className="panel-head">
+          <div>
+            <div className="panel-title">DAILY SERVICE TARGETS</div>
+            <div className="panel-subtitle mono">PER-BRANCH TARGETS SHOWN IN THE STAFF APP DASHBOARD</div>
+          </div>
+          <select className="opname-select" value={targetBranchId} onChange={(event) => setTargetBranchId(event.target.value)}>
+            <option value="">Select a branch...</option>
+            {branches.map((branch, index) => (
+              <option key={getBranchStoreId(branch) ?? index} value={getBranchStoreId(branch) ?? ''}>
+                {branch.name || branch.code || `Branch ${index + 1}`}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {!targetBranchId ? <div className="finance-empty mono">Select a branch to view and edit its daily targets.</div> : null}
+        {targetsLoading ? <div className="finance-empty mono">LOADING TARGETS...</div> : null}
+
+        {targetBranchId && !targetsLoading ? (
+          <div className="report-table-wrap">
+            <table className="report-table">
+              <thead>
+                <tr>
+                  <th>Service</th>
+                  <th>Daily Target</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {targets.map((target) => (
+                  <tr key={target.id}>
+                    <td><strong>{target.serviceLabel}</strong></td>
+                    <td>
+                      <input
+                        type="number"
+                        min="0"
+                        value={targetDrafts[target.id] ?? ''}
+                        onChange={(event) => setTargetDrafts((current) => ({ ...current, [target.id]: event.target.value }))}
+                      />
+                    </td>
+                    <td>
+                      <button type="button" className="opname-button" disabled={savingTargetId === target.id} onClick={() => submitTarget(target)}>
+                        {savingTargetId === target.id ? 'Saving' : 'Save'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </section>
     </div>
   );
 }
@@ -6530,7 +6637,7 @@ function DashboardContent({ session, onLogout }) {
           <Route path="/finance" element={<FinanceView dashboard={dashboard} />} />
           <Route path="/accounting" element={<AccountingView dashboard={dashboard} />} />
           <Route path="/reports" element={<ReportsView dashboard={dashboard} />} />
-          <Route path="/settings" element={<SettingsView />} />
+          <Route path="/settings" element={<SettingsView dashboard={dashboard} />} />
           <Route path="/loyalty" element={<LoyaltyVoucherView />} />
           <Route path="/hris" element={<HRISView dashboard={dashboard} />} />
           <Route
