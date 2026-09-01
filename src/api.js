@@ -337,6 +337,62 @@ export const createAccountingJournal = async (payload) => {
   return result.data;
 };
 
+export const loadItemMaster = async ({ search, category } = {}) => {
+  const params = new URLSearchParams();
+  if (search) params.set('search', search);
+  if (category) params.set('category', category);
+  const query = params.toString();
+  const result = await requestJson(`/items${query ? `?${query}` : ''}`);
+
+  return Array.isArray(result?.data) ? result.data : [];
+};
+
+export const createItemMaster = async (payload) => {
+  const result = await requestJson('/items', {
+    method: 'POST',
+    body: payload,
+  });
+
+  return result.data;
+};
+
+export const loadBranchStock = async ({ branchId, itemId } = {}) => {
+  const params = new URLSearchParams();
+  if (branchId !== undefined && branchId !== null && branchId !== '') params.set('branchId', branchId);
+  if (itemId !== undefined && itemId !== null && itemId !== '') params.set('itemId', itemId);
+  const query = params.toString();
+  const result = await requestJson(`/branch-stock${query ? `?${query}` : ''}`);
+
+  return Array.isArray(result?.data) ? result.data : [];
+};
+
+export const addBranchStock = async (payload) => {
+  const result = await requestJson('/branch-stock', {
+    method: 'POST',
+    body: payload,
+  });
+
+  return result.data;
+};
+
+export const transferBranchStock = async (payload) => {
+  const result = await requestJson('/branch-stock/transfer', {
+    method: 'POST',
+    body: payload,
+  });
+
+  return result.data;
+};
+
+export const loadStockTransfers = async ({ branchId } = {}) => {
+  const params = new URLSearchParams();
+  if (branchId !== undefined && branchId !== null && branchId !== '') params.set('branchId', branchId);
+  const query = params.toString();
+  const result = await requestJson(`/branch-stock/transfers${query ? `?${query}` : ''}`);
+
+  return Array.isArray(result?.data) ? result.data : [];
+};
+
 export const loginStaff = async ({ identifier, email, password }) => {
   const loginIdentifier = String(identifier || email || '').trim();
   const response = await fetch(`${getApiBaseUrl()}/auth/login`, {

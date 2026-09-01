@@ -23,6 +23,12 @@ import {
   loadAccountingSystem,
   createAccountingAccount,
   createAccountingJournal,
+  loadItemMaster,
+  createItemMaster,
+  loadBranchStock,
+  addBranchStock,
+  transferBranchStock,
+  loadStockTransfers,
 } from './api';
 
 const DEFAULT_LOGIN = {
@@ -44,6 +50,7 @@ const NAV_ITEMS = [
   { label: 'Members', icon: 'members', path: '/members' },
   { label: 'Inventory', icon: 'inventory', path: '/inventory' },
   { label: 'Stock Opname', icon: 'inventory', path: '/stock-opname' },
+  { label: 'Branch Stock', icon: 'inventory', path: '/branch-stock' },
   { label: 'Finance', icon: 'ledger', path: '/finance' },
   { label: 'Accounting', icon: 'ledger', path: '/accounting' },
   { label: 'Attendance', icon: 'attendance', path: '/attendance' },
@@ -4199,6 +4206,245 @@ function StockOpnameView({ dashboard }) {
   );
 }
 
+function BranchStockView({ dashboard }) {
+  const branches = Array.isArray(dashboard?.branchLocations) ? dashboard.branchLocations : [];
+  const [selectedBranchId, setSelectedBranchId] = useState('');
+  const [state, setState] = useState({ items: [], stock: [], transfers: [], loading: true, error: '', message: '' });
+  const [itemForm, setItemForm] = useState({ itemCode: '', itemName: '', category: 'other', unit: 'pcs', unitCost: '', reorderPoint: '' });
+  const [savingItem, setSavingItem] = useState(false);
+  const [stockForm, setStockForm] = useState({ itemId: '', branchId: '', quantity: '', reason: '' });
+  const [savingStock, setSavingStock] = useState(false);
+  const [transferForm, setTransferForm] = useState({ itemId: '', fromBranchId: '', toBranchId: '', quantity: '', notes: '' });
+  const [savingTransfer, setSavingTransfer] = useState(false);
+
+  const reloadAll = async () => {
+    const [items, stock, transfers] = await Promise.all([loadItemMaster(), loadBranchStock(), loadStockTransfers()]);
+    setState({ items, stock, transfers, loading: false, error: '', message: '' });
+  };
+
+  useEffect(() => {
+    reloadAll().catch((error) => setState((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : 'Failed to load branch stock' })));
+  }, []);
+
+  const branchLabel = (branchId) => {
+    const branch = branches.find((item) => String(getBranchStoreId(item) ?? '') === String(branchId));
+    return branch ? (branch.code || branch.name) : `Branch ${branchId}`;
+  };
+
+  const visibleStock = selectedBranchId
+    ? state.stock.filter((row) => String(row.branchId) === String(selectedBranchId))
+    : state.stock;
+
+  const totalStockQty = visibleStock.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
+  const lowStockCount = visibleStock.filter((row) => row.stockStatus === 'low-stock' || row.stockStatus === 'out-of-stock').length;
+
+  const submitItem = async (event) => {
+    event.preventDefault();
+    setSavingItem(true);
+    try {
+      const item = await createItemMaster(itemForm);
+      setState((current) => ({
+        ...current,
+        items: [...current.items, item].sort((a, b) => String(a.itemName).localeCompare(String(b.itemName))),
+        message: `${item.itemName} added to item master.`,
+        error: '',
+      }));
+      setItemForm({ itemCode: '', itemName: '', category: 'other', unit: 'pcs', unitCost: '', reorderPoint: '' });
+    } catch (error) {
+      setState((current) => ({ ...current, error: error instanceof Error ? error.message : 'Failed to create item', message: '' }));
+    } finally {
+      setSavingItem(false);
+    }
+  };
+
+  const submitStock = async (event) => {
+    event.preventDefault();
+    setSavingStock(true);
+    try {
+      const row = await addBranchStock(stockForm);
+      setState((current) => ({
+        ...current,
+        stock: [...current.stock.filter((existing) => existing.id !== row.id), row],
+        message: `Stock added for ${row.item?.itemName || 'item'} at ${branchLabel(row.branchId)}.`,
+        error: '',
+      }));
+      setStockForm((current) => ({ ...current, quantity: '', reason: '' }));
+    } catch (error) {
+      setState((current) => ({ ...current, error: error instanceof Error ? error.message : 'Failed to add stock', message: '' }));
+    } finally {
+      setSavingStock(false);
+    }
+  };
+
+  const submitTransfer = async (event) => {
+    event.preventDefault();
+    setSavingTransfer(true);
+    try {
+      const transfer = await transferBranchStock(transferForm);
+      const [stock, transfers] = await Promise.all([loadBranchStock(), loadStockTransfers()]);
+      setState((current) => ({
+        ...current,
+        stock,
+        transfers,
+        message: `Transferred ${transfer.quantity} ${transfer.item?.unit || ''} of ${transfer.item?.itemName || 'item'} to ${branchLabel(transfer.toBranchId)}.`,
+        error: '',
+      }));
+      setTransferForm((current) => ({ ...current, quantity: '', notes: '' }));
+    } catch (error) {
+      setState((current) => ({ ...current, error: error instanceof Error ? error.message : 'Failed to transfer stock', message: '' }));
+    } finally {
+      setSavingTransfer(false);
+    }
+  };
+
+  return (
+    <div className="route-grid route-grid-accounting">
+      <section className="panel finance-hero-panel">
+        <div className="panel-head">
+          <div>
+            <div className="panel-title finance-panel-title">BRANCH STOCK & TRANSFERS</div>
+            <div className="panel-subtitle mono">ITEM MASTER • PER-BRANCH STOCK • INTER-BRANCH TRANSFER</div>
+          </div>
+          <select className="opname-select" value={selectedBranchId} onChange={(event) => setSelectedBranchId(event.target.value)}>
+            <option value="">All branches</option>
+            {branches.map((branch, index) => (
+              <option key={getBranchStoreId(branch) ?? index} value={getBranchStoreId(branch) ?? ''}>
+                {branch.name || branch.code || `Branch ${index + 1}`}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="finance-kpi-grid">
+          <article className="finance-kpi-card"><div className="finance-kpi-label mono">MASTER ITEMS</div><div className="finance-kpi-value">{state.items.length}</div><div className="finance-kpi-note">Catalog entries</div></article>
+          <article className="finance-kpi-card"><div className="finance-kpi-label mono">STOCK QTY</div><div className="finance-kpi-value">{totalStockQty}</div><div className="finance-kpi-note">{selectedBranchId ? branchLabel(selectedBranchId) : 'All branches'}</div></article>
+          <article className="finance-kpi-card"><div className="finance-kpi-label mono">LOW / OUT OF STOCK</div><div className="finance-kpi-value">{lowStockCount}</div><div className="finance-kpi-note">Needs restock</div></article>
+          <article className="finance-kpi-card"><div className="finance-kpi-label mono">TRANSFERS</div><div className="finance-kpi-value">{state.transfers.length}</div><div className="finance-kpi-note">Completed transfers</div></article>
+        </div>
+
+        {state.loading ? <div className="finance-empty mono">LOADING BRANCH STOCK...</div> : null}
+        {state.error ? <div className="finance-empty mono">{state.error}</div> : null}
+        {state.message ? <div className="finance-empty mono">{state.message}</div> : null}
+      </section>
+
+      <section className="panel accounting-form-panel">
+        <div className="panel-title">NEW MASTER ITEM</div>
+        <form className="accounting-form" onSubmit={submitItem}>
+          <input value={itemForm.itemCode} onChange={(event) => setItemForm((current) => ({ ...current, itemCode: event.target.value }))} placeholder="Item code" required />
+          <input value={itemForm.itemName} onChange={(event) => setItemForm((current) => ({ ...current, itemName: event.target.value }))} placeholder="Item name" required />
+          <select value={itemForm.category} onChange={(event) => setItemForm((current) => ({ ...current, category: event.target.value }))}>
+            <option value="chemical">Chemical</option><option value="hardware">Hardware</option><option value="supply">Supply</option><option value="tool">Tool</option><option value="consumable">Consumable</option><option value="other">Other</option>
+          </select>
+          <input value={itemForm.unit} onChange={(event) => setItemForm((current) => ({ ...current, unit: event.target.value }))} placeholder="Unit (e.g. pcs, ltr)" />
+          <input type="number" min="0" value={itemForm.unitCost} onChange={(event) => setItemForm((current) => ({ ...current, unitCost: event.target.value }))} placeholder="Unit cost (optional)" />
+          <input type="number" min="0" value={itemForm.reorderPoint} onChange={(event) => setItemForm((current) => ({ ...current, reorderPoint: event.target.value }))} placeholder="Reorder point (optional)" />
+          <button type="submit" className="opname-button" disabled={savingItem}>{savingItem ? 'Saving' : 'Create Item'}</button>
+        </form>
+      </section>
+
+      <section className="panel accounting-form-panel">
+        <div className="panel-title">ADD STOCK TO BRANCH</div>
+        <form className="accounting-form" onSubmit={submitStock}>
+          <select value={stockForm.itemId} onChange={(event) => setStockForm((current) => ({ ...current, itemId: event.target.value }))} required>
+            <option value="">Select item</option>
+            {state.items.map((item) => <option key={item.id} value={item.id}>{item.itemCode} - {item.itemName}</option>)}
+          </select>
+          <select value={stockForm.branchId} onChange={(event) => setStockForm((current) => ({ ...current, branchId: event.target.value }))} required>
+            <option value="">Select branch</option>
+            {branches.map((branch, index) => (
+              <option key={getBranchStoreId(branch) ?? index} value={getBranchStoreId(branch) ?? ''}>
+                {branch.name || branch.code || `Branch ${index + 1}`}
+              </option>
+            ))}
+          </select>
+          <input type="number" min="1" value={stockForm.quantity} onChange={(event) => setStockForm((current) => ({ ...current, quantity: event.target.value }))} placeholder="Quantity to add" required />
+          <input value={stockForm.reason} onChange={(event) => setStockForm((current) => ({ ...current, reason: event.target.value }))} placeholder="Reason (optional)" />
+          <button type="submit" className="opname-button" disabled={savingStock}>{savingStock ? 'Saving' : 'Add Stock'}</button>
+        </form>
+      </section>
+
+      <section className="panel accounting-form-panel">
+        <div className="panel-title">TRANSFER STOCK BETWEEN BRANCHES</div>
+        <form className="accounting-form" onSubmit={submitTransfer}>
+          <select value={transferForm.itemId} onChange={(event) => setTransferForm((current) => ({ ...current, itemId: event.target.value }))} required>
+            <option value="">Select item</option>
+            {state.items.map((item) => <option key={item.id} value={item.id}>{item.itemCode} - {item.itemName}</option>)}
+          </select>
+          <select value={transferForm.fromBranchId} onChange={(event) => setTransferForm((current) => ({ ...current, fromBranchId: event.target.value }))} required>
+            <option value="">From branch</option>
+            {branches.map((branch, index) => (
+              <option key={getBranchStoreId(branch) ?? index} value={getBranchStoreId(branch) ?? ''}>
+                {branch.name || branch.code || `Branch ${index + 1}`}
+              </option>
+            ))}
+          </select>
+          <select value={transferForm.toBranchId} onChange={(event) => setTransferForm((current) => ({ ...current, toBranchId: event.target.value }))} required>
+            <option value="">To branch</option>
+            {branches.map((branch, index) => (
+              <option key={getBranchStoreId(branch) ?? index} value={getBranchStoreId(branch) ?? ''}>
+                {branch.name || branch.code || `Branch ${index + 1}`}
+              </option>
+            ))}
+          </select>
+          <input type="number" min="1" value={transferForm.quantity} onChange={(event) => setTransferForm((current) => ({ ...current, quantity: event.target.value }))} placeholder="Quantity" required />
+          <input value={transferForm.notes} onChange={(event) => setTransferForm((current) => ({ ...current, notes: event.target.value }))} placeholder="Notes (optional)" />
+          <button type="submit" className="opname-button" disabled={savingTransfer || !transferForm.fromBranchId || !transferForm.toBranchId || transferForm.fromBranchId === transferForm.toBranchId}>
+            {savingTransfer ? 'Transferring' : 'Transfer Stock'}
+          </button>
+        </form>
+      </section>
+
+      <section className="panel accounting-wide-panel">
+        <div className="panel-title">ITEM MASTER</div>
+        <div className="opname-table">
+          <div className="item-head mono"><span>Code</span><span>Name</span><span>Category</span><span>Unit</span><span>Total Stock</span></div>
+          {state.items.map((item) => (
+            <div key={item.id} className="item-row">
+              <strong>{item.itemCode}</strong>
+              <span>{item.itemName}</span>
+              <span>{item.category}</span>
+              <span>{item.unit}</span>
+              <span>{item.totalStock ?? 0}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel accounting-wide-panel">
+        <div className="panel-title">STOCK BY BRANCH</div>
+        <div className="opname-table">
+          <div className="stock-head mono"><span>Item</span><span>Branch</span><span>Quantity</span><span>Status</span></div>
+          {visibleStock.map((row) => (
+            <div key={row.id} className="stock-row">
+              <strong>{row.item?.itemCode} - {row.item?.itemName}</strong>
+              <span>{branchLabel(row.branchId)}</span>
+              <span>{row.quantity} {row.item?.unit}</span>
+              <span className={row.stockStatus === 'in-stock' ? 'finance-tone-good' : 'finance-tone-warn'}>{row.stockStatus}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel accounting-wide-panel">
+        <div className="panel-title">TRANSFER HISTORY</div>
+        <div className="opname-table">
+          <div className="transfer-head mono"><span>Transfer No</span><span>Item</span><span>From</span><span>To</span><span>Qty</span><span>Date</span></div>
+          {state.transfers.map((transfer) => (
+            <div key={transfer.id} className="transfer-row">
+              <strong>{transfer.transferNo}</strong>
+              <span>{transfer.item?.itemCode} - {transfer.item?.itemName}</span>
+              <span>{branchLabel(transfer.fromBranchId)}</span>
+              <span>{branchLabel(transfer.toBranchId)}</span>
+              <span>{transfer.quantity} {transfer.item?.unit}</span>
+              <span>{transfer.transferDate}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function AccountingView({ dashboard }) {
   const branches = Array.isArray(dashboard?.branchLocations) ? dashboard.branchLocations : [];
   const today = new Date().toISOString().slice(0, 10);
@@ -5341,6 +5587,7 @@ function DashboardContent({ session, onLogout }) {
           <Route path="/compliments" element={<ComplimentsView dashboard={dashboard} />} />
           <Route path="/inventory" element={<InventoryView dashboard={dashboard} />} />
           <Route path="/stock-opname" element={<StockOpnameView dashboard={dashboard} />} />
+          <Route path="/branch-stock" element={<BranchStockView dashboard={dashboard} />} />
           <Route path="/finance" element={<FinanceView dashboard={dashboard} />} />
           <Route path="/accounting" element={<AccountingView dashboard={dashboard} />} />
           <Route

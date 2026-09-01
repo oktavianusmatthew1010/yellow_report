@@ -1486,9 +1486,45 @@ button {
   font-size: 0.82rem;
 }
 
+.item-head,
+.item-row {
+  display: grid;
+  grid-template-columns: 130px minmax(200px, 1fr) 120px 90px 110px;
+  gap: 10px;
+  align-items: center;
+  min-width: 700px;
+  padding: 11px;
+  font-size: 0.82rem;
+}
+
+.stock-head,
+.stock-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 140px 130px 120px;
+  gap: 10px;
+  align-items: center;
+  min-width: 650px;
+  padding: 11px;
+  font-size: 0.82rem;
+}
+
+.transfer-head,
+.transfer-row {
+  display: grid;
+  grid-template-columns: 150px minmax(200px, 1fr) 120px 120px 100px 110px;
+  gap: 10px;
+  align-items: center;
+  min-width: 780px;
+  padding: 11px;
+  font-size: 0.82rem;
+}
+
 .opname-head,
 .coa-head,
-.journal-head {
+.journal-head,
+.item-head,
+.stock-head,
+.transfer-head {
   background: rgba(4, 13, 26, 0.55);
   color: #dccda7;
   font-size: 0.66rem;
@@ -1497,21 +1533,30 @@ button {
 
 .opname-row,
 .coa-row,
-.journal-row {
+.journal-row,
+.item-row,
+.stock-row,
+.transfer-row {
   border-top: 1px solid rgba(255, 209, 28, 0.1);
   color: var(--text-dim);
 }
 
 .opname-row strong,
 .coa-row strong,
-.journal-row strong {
+.journal-row strong,
+.item-row strong,
+.stock-row strong,
+.transfer-row strong {
   color: #f6f2dd;
   overflow-wrap: anywhere;
 }
 
 .opname-row span,
 .coa-row span,
-.journal-row span {
+.journal-row span,
+.item-row span,
+.stock-row span,
+.transfer-row span {
   min-width: 0;
   overflow-wrap: anywhere;
 }
