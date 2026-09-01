@@ -600,10 +600,10 @@ export const loadAttendanceReport = async ({ branch, startDate, endDate, limit =
   return records;
 };
 
-// Note: Clockster's attendance/report endpoint ignores the `locations` filter
-// and always returns the full company roster, so this fetches once for the
-// whole period rather than fanning out one paginated request per branch.
-export const loadAttendanceReportForPeriod = async ({ startDate, endDate, limit = 100 } = {}) => {
+// Unlike attendance/report, /clockster/schedules DOES filter correctly by
+// `locations`, and each day includes a `schedule` (work/leave/day off) plus
+// resolved `in`/`out` clock times - needed to exclude off days from payroll.
+export const loadScheduleReportForLocation = async ({ locationId, startDate, endDate, limit = 100 } = {}) => {
   const entries = [];
   let page = 1;
   let totalPages = 1;
@@ -612,11 +612,12 @@ export const loadAttendanceReportForPeriod = async ({ startDate, endDate, limit 
     const query = new URLSearchParams({
       date_start: startDate,
       date_end: endDate,
+      locations: String(locationId),
       page: String(page),
       limit: String(limit),
     });
 
-    const result = await requestJson(`/attendance/report?${query.toString()}`);
+    const result = await requestJson(`/clockster/schedules?${query.toString()}`);
     entries.push(...(Array.isArray(result?.data) ? result.data : []));
     totalPages = Number(result?.meta?.last_page || result?.last_page || 1);
     page += 1;

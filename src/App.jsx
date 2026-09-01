@@ -37,7 +37,7 @@ import {
   cancelPurchaseOrder,
   loadMaintenanceAssets,
   loadAttendanceReport,
-  loadAttendanceReportForPeriod,
+  loadScheduleReportForLocation,
   loadSalaryScales,
   createSalaryScale,
   loadSalaryAssignments,
@@ -5217,18 +5217,18 @@ const getPayrollWeeks = (monthStr) => {
     }));
 };
 
-const buildDailyPresenceMap = (reportEntries = []) => {
+const buildDailyAttendanceMap = (scheduleEntries = []) => {
   const byUserDate = new Map();
 
-  reportEntries.forEach((entry) => {
+  scheduleEntries.forEach((entry) => {
     const userId = entry?.user?.id;
     const dates = entry?.dates;
     if (userId == null || !dates) return;
 
     Object.entries(dates).forEach(([dateKey, day]) => {
       byUserDate.set(`${userId}|${dateKey}`, {
-        hasClockIn: Boolean(day?.in),
-        hasClockOut: Boolean(day?.out),
+        isWorkDay: day?.schedule?.type === 'work',
+        isComplete: Boolean(day?.in) && Boolean(day?.out),
       });
     });
   });
@@ -5236,28 +5236,29 @@ const buildDailyPresenceMap = (reportEntries = []) => {
   return byUserDate;
 };
 
-const computeStaffPayrollForMonth = (staffId, salary, presenceMap, weeks, today) => {
+const computeStaffPayrollForMonth = (staffId, salary, attendanceMap, weeks, today) => {
   let daysPresent = 0;
   let weeksEarned = 0;
   let weeksEvaluated = 0;
 
   weeks.forEach((week) => {
-    let elapsedDays = 0;
+    let requiredDays = 0;
     let completeDays = 0;
 
     for (let day = new Date(week.start); day <= week.end; day.setDate(day.getDate() + 1)) {
       if (day > today) continue;
-      elapsedDays += 1;
-      const record = presenceMap.get(`${staffId}|${toYmd(day)}`);
-      if (record?.hasClockIn && record?.hasClockOut) {
+      const record = attendanceMap.get(`${staffId}|${toYmd(day)}`);
+      if (!record?.isWorkDay) continue;
+      requiredDays += 1;
+      if (record.isComplete) {
         completeDays += 1;
         daysPresent += 1;
       }
     }
 
-    if (elapsedDays > 0) {
+    if (requiredDays > 0) {
       weeksEvaluated += 1;
-      if (completeDays === elapsedDays) weeksEarned += 1;
+      if (completeDays === requiredDays) weeksEarned += 1;
     }
   });
 
@@ -5353,16 +5354,24 @@ function HRISView() {
       today.setHours(0, 0, 0, 0);
 
       const assignedStaff = state.staff.filter((person) => assignmentByStaffId.get(person.id));
+      const locationIds = [...new Set(assignedStaff.map((person) => person.location?.id).filter((id) => id != null))];
 
-      const reportEntries = await loadAttendanceReportForPeriod({
-        startDate: toYmd(monthStart),
-        endDate: toYmd(monthEnd),
-      });
-      const presenceMap = buildDailyPresenceMap(reportEntries);
+      // Fetched one branch at a time (not in parallel) to avoid hammering the
+      // upstream Clockster API, which rate-limits bursts of concurrent requests.
+      const scheduleEntries = [];
+      for (const locationId of (locationIds.length ? locationIds : ['17526'])) {
+        const entries = await loadScheduleReportForLocation({
+          locationId,
+          startDate: toYmd(monthStart),
+          endDate: toYmd(monthEnd),
+        });
+        scheduleEntries.push(...entries);
+      }
+      const attendanceMap = buildDailyAttendanceMap(scheduleEntries);
 
       const rows = assignedStaff.map((person) => {
         const assignment = assignmentByStaffId.get(person.id);
-        const result = computeStaffPayrollForMonth(person.id, assignment.salary, presenceMap, weeks, today);
+        const result = computeStaffPayrollForMonth(person.id, assignment.salary, attendanceMap, weeks, today);
         return {
           staffId: person.id,
           name: [person.first_name, person.last_name].filter(Boolean).join(' ') || `Staff ${person.id}`,
@@ -5533,7 +5542,7 @@ function HRISView() {
         <div className="panel-head">
           <div>
             <div className="panel-title">HITUNG GAJI (PAYROLL)</div>
-            <div className="panel-subtitle mono">GAJI POKOK PENUH SETIAP BULAN • KERAJINAN PER MINGGU (1-8, 9-15, 16-23, 24-AKHIR BULAN) DIBAYAR PENUH HANYA JIKA TIDAK ADA HARI TANPA CLOCK-IN &amp; CLOCK-OUT LENGKAP DI MINGGU TSB</div>
+            <div className="panel-subtitle mono">GAJI POKOK PENUH SETIAP BULAN • KERAJINAN PER MINGGU (1-8, 9-15, 16-23, 24-AKHIR BULAN) DIBAYAR PENUH JIKA HADIR LENGKAP (CLOCK-IN &amp; CLOCK-OUT) DI SETIAP HARI KERJA TERJADWAL MINGGU TSB • HARI OFF/LEAVE DIKECUALIKAN</div>
           </div>
           <div className="panel-meta">{payroll.rows.length ? `${formatRupiah(totalPayrollForPeriod)} TOTAL` : ''}</div>
         </div>
