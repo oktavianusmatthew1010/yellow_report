@@ -393,6 +393,34 @@ export const loadStockTransfers = async ({ branchId } = {}) => {
   return Array.isArray(result?.data) ? result.data : [];
 };
 
+export const loadSalaryScales = async () => {
+  const result = await requestJson('/hr/salary-scales');
+  return Array.isArray(result?.data) ? result.data : [];
+};
+
+export const createSalaryScale = async (payload) => {
+  const result = await requestJson('/hr/salary-scales', {
+    method: 'POST',
+    body: payload,
+  });
+
+  return result.data;
+};
+
+export const loadHrStaff = async () => {
+  const result = await requestJson('/hr/staff');
+  return Array.isArray(result?.data) ? result.data : [];
+};
+
+export const assignStaffSalary = async (staffId, salaryScaleId) => {
+  const result = await requestJson(`/hr/staff/${encodeURIComponent(String(staffId))}/salary`, {
+    method: 'POST',
+    body: { salaryScaleId },
+  });
+
+  return result.data;
+};
+
 export const loadMaintenanceAssets = async () => {
   const result = await requestJson('/maintenance/assets');
   return Array.isArray(result?.data) ? result.data : [];

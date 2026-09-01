@@ -31,6 +31,10 @@ import {
   loadStockTransfers,
   loadMaintenanceAssets,
   loadAttendanceReport,
+  loadSalaryScales,
+  createSalaryScale,
+  loadHrStaff,
+  assignStaffSalary,
 } from './api';
 import { exportRowsToExcel, exportRowsToPdf } from './reportExport';
 
@@ -57,6 +61,7 @@ const NAV_ITEMS = [
   { label: 'Finance', icon: 'ledger', path: '/finance' },
   { label: 'Accounting', icon: 'ledger', path: '/accounting' },
   { label: 'Reports', icon: 'ledger', path: '/reports' },
+  { label: 'HRIS', icon: 'members', path: '/hris' },
   { label: 'Attendance', icon: 'attendance', path: '/attendance' },
   { label: 'Timetable', icon: 'calendar', path: '/timetable' },
   { label: 'Compliments', icon: 'coupon', path: '/compliments' },
@@ -4449,6 +4454,185 @@ function BranchStockView({ dashboard }) {
   );
 }
 
+function HRISView({ dashboard }) {
+  const branches = Array.isArray(dashboard?.branchLocations) ? dashboard.branchLocations : [];
+  const [state, setState] = useState({ staff: [], scales: [], loading: true, error: '', message: '' });
+  const [scaleForm, setScaleForm] = useState({ positionName: '', gajiPokok: '', uangMakan: '', transport: '', kerajinanWeekly: '' });
+  const [savingScale, setSavingScale] = useState(false);
+  const [savingStaffId, setSavingStaffId] = useState(null);
+
+  const reload = async () => {
+    const [staff, scales] = await Promise.all([loadHrStaff(), loadSalaryScales()]);
+    setState({ staff, scales, loading: false, error: '', message: '' });
+  };
+
+  useEffect(() => {
+    reload().catch((error) => setState((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : 'Failed to load HRIS' })));
+  }, []);
+
+  const branchLabel = (locationId) => {
+    const branch = branches.find((item) => String(getBranchStoreId(item) ?? '') === String(locationId));
+    return branch ? (branch.code || branch.name) : (locationId ? `Location ${locationId}` : 'Unassigned');
+  };
+
+  const activeStaffCount = state.staff.filter((staff) => staff.isActive).length;
+  const unassignedCount = state.staff.filter((staff) => !staff.salaryScaleId).length;
+  const totalMonthlyPayroll = state.staff.reduce((sum, staff) => sum + Number(staff.salary?.totalGaji || 0), 0);
+
+  const submitScale = async (event) => {
+    event.preventDefault();
+    setSavingScale(true);
+    try {
+      const scale = await createSalaryScale(scaleForm);
+      setState((current) => ({
+        ...current,
+        scales: [...current.scales, scale].sort((a, b) => b.totalGaji - a.totalGaji),
+        message: `${scale.positionName} added to the salary scale.`,
+        error: '',
+      }));
+      setScaleForm({ positionName: '', gajiPokok: '', uangMakan: '', transport: '', kerajinanWeekly: '' });
+    } catch (error) {
+      setState((current) => ({ ...current, error: error instanceof Error ? error.message : 'Failed to create salary scale', message: '' }));
+    } finally {
+      setSavingScale(false);
+    }
+  };
+
+  const handleAssign = async (staffId, salaryScaleId) => {
+    if (!salaryScaleId) return;
+    setSavingStaffId(staffId);
+    try {
+      await assignStaffSalary(staffId, Number(salaryScaleId));
+      const staff = await loadHrStaff();
+      setState((current) => ({ ...current, staff, message: 'Salary assigned.', error: '' }));
+    } catch (error) {
+      setState((current) => ({ ...current, error: error instanceof Error ? error.message : 'Failed to assign salary', message: '' }));
+    } finally {
+      setSavingStaffId(null);
+    }
+  };
+
+  return (
+    <div className="route-grid route-grid-accounting">
+      <section className="panel finance-hero-panel">
+        <div className="panel-head">
+          <div>
+            <div className="panel-title finance-panel-title">HRIS</div>
+            <div className="panel-subtitle mono">STAFF DIRECTORY • SALARY SCALE BY POSITION</div>
+          </div>
+        </div>
+
+        <div className="finance-kpi-grid">
+          <article className="finance-kpi-card"><div className="finance-kpi-label mono">TOTAL STAFF</div><div className="finance-kpi-value">{state.staff.length}</div><div className="finance-kpi-note">{activeStaffCount} active</div></article>
+          <article className="finance-kpi-card"><div className="finance-kpi-label mono">SALARY POSITIONS</div><div className="finance-kpi-value">{state.scales.length}</div><div className="finance-kpi-note">Imported pay scale</div></article>
+          <article className="finance-kpi-card"><div className="finance-kpi-label mono">UNASSIGNED</div><div className="finance-kpi-value">{unassignedCount}</div><div className="finance-kpi-note">Staff without a position set</div></article>
+          <article className="finance-kpi-card"><div className="finance-kpi-label mono">MONTHLY PAYROLL</div><div className="finance-kpi-value">{formatRupiah(totalMonthlyPayroll)}</div><div className="finance-kpi-note">Assigned staff only</div></article>
+        </div>
+
+        {state.loading ? <div className="finance-empty mono">LOADING HRIS...</div> : null}
+        {state.error ? <div className="finance-empty mono">{state.error}</div> : null}
+        {state.message ? <div className="finance-empty mono">{state.message}</div> : null}
+      </section>
+
+      <section className="panel accounting-form-panel">
+        <div className="panel-title">ADD SALARY POSITION</div>
+        <form className="accounting-form" onSubmit={submitScale}>
+          <input value={scaleForm.positionName} onChange={(event) => setScaleForm((current) => ({ ...current, positionName: event.target.value }))} placeholder="Position name" required />
+          <input type="number" min="0" value={scaleForm.gajiPokok} onChange={(event) => setScaleForm((current) => ({ ...current, gajiPokok: event.target.value }))} placeholder="Gaji pokok" />
+          <input type="number" min="0" value={scaleForm.uangMakan} onChange={(event) => setScaleForm((current) => ({ ...current, uangMakan: event.target.value }))} placeholder="Uang makan" />
+          <input type="number" min="0" value={scaleForm.transport} onChange={(event) => setScaleForm((current) => ({ ...current, transport: event.target.value }))} placeholder="Transport" />
+          <input type="number" min="0" value={scaleForm.kerajinanWeekly} onChange={(event) => setScaleForm((current) => ({ ...current, kerajinanWeekly: event.target.value }))} placeholder="Uang kerajinan (per minggu)" />
+          <button type="submit" className="opname-button" disabled={savingScale}>{savingScale ? 'Saving' : 'Add Position'}</button>
+        </form>
+      </section>
+
+      <section className="panel accounting-wide-panel">
+        <div className="panel-head">
+          <div className="panel-title">SALARY SCALE (IMPORTED FROM LIST GAJI DAN TARGET.XLSX)</div>
+          <div className="panel-meta">{state.scales.length} POSITIONS</div>
+        </div>
+        <div className="finance-empty mono">Uang kerajinan dihitung mingguan: minggu 1 (tgl 1-8), minggu 2 (9-15), minggu 3 (16-23), minggu 4 (24-30/31). Total gaji = gaji pokok + uang makan + transport + (kerajinan x 4 minggu).</div>
+        <div className="report-table-wrap">
+          <table className="report-table">
+            <thead>
+              <tr>
+                <th>Position</th>
+                <th>Gaji Pokok</th>
+                <th>Uang Makan</th>
+                <th>Transport</th>
+                <th>Kerajinan / Minggu</th>
+                <th>Total Gaji</th>
+              </tr>
+            </thead>
+            <tbody>
+              {state.scales.map((scale) => (
+                <tr key={scale.id}>
+                  <td><strong>{scale.positionName}</strong></td>
+                  <td>{formatRupiah(scale.gajiPokok)}</td>
+                  <td>{formatRupiah(scale.uangMakan)}</td>
+                  <td>{formatRupiah(scale.transport)}</td>
+                  <td>{formatRupiah(scale.kerajinanWeekly)}</td>
+                  <td>{formatRupiah(scale.totalGaji)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="panel accounting-wide-panel">
+        <div className="panel-head">
+          <div className="panel-title">ALL STAFF</div>
+          <div className="panel-meta">{state.staff.length} STAFF</div>
+        </div>
+        <div className="report-table-wrap">
+          <table className="report-table">
+            <thead>
+              <tr>
+                <th>Staff No</th>
+                <th>Name</th>
+                <th>Branch</th>
+                <th>Status</th>
+                <th>Position</th>
+                <th>Gaji Pokok</th>
+                <th>Uang Makan</th>
+                <th>Transport</th>
+                <th>Kerajinan / Minggu</th>
+                <th>Total Gaji</th>
+              </tr>
+            </thead>
+            <tbody>
+              {state.staff.map((staff) => (
+                <tr key={staff.staffId}>
+                  <td>{staff.staffno}</td>
+                  <td><strong>{staff.staffname}</strong></td>
+                  <td>{branchLabel(staff.locationid)}</td>
+                  <td>{staff.isActive ? 'Active' : 'Resigned'}</td>
+                  <td>
+                    <select
+                      value={staff.salaryScaleId ?? ''}
+                      disabled={savingStaffId === staff.staffId}
+                      onChange={(event) => handleAssign(staff.staffId, event.target.value)}
+                    >
+                      <option value="">Not set</option>
+                      {state.scales.map((scale) => <option key={scale.id} value={scale.id}>{scale.positionName}</option>)}
+                    </select>
+                  </td>
+                  <td>{staff.salary ? formatRupiah(staff.salary.gajiPokok) : '-'}</td>
+                  <td>{staff.salary ? formatRupiah(staff.salary.uangMakan) : '-'}</td>
+                  <td>{staff.salary ? formatRupiah(staff.salary.transport) : '-'}</td>
+                  <td>{staff.salary ? formatRupiah(staff.salary.kerajinanWeekly) : '-'}</td>
+                  <td>{staff.salary ? formatRupiah(staff.salary.totalGaji) : '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 const REPORT_TYPES = [
   { key: 'transactions', label: 'Transactions', needsBranch: true, needsDate: true, hint: 'Orders and payments per branch and date range.' },
   { key: 'accounting', label: 'Accounting', needsBranch: true, needsDate: true, hint: 'Posted journal entries per branch and date range.' },
@@ -5877,6 +6061,7 @@ function DashboardContent({ session, onLogout }) {
           <Route path="/finance" element={<FinanceView dashboard={dashboard} />} />
           <Route path="/accounting" element={<AccountingView dashboard={dashboard} />} />
           <Route path="/reports" element={<ReportsView dashboard={dashboard} />} />
+          <Route path="/hris" element={<HRISView dashboard={dashboard} />} />
           <Route
             path="/attendance"
             element={
