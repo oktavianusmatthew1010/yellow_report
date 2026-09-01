@@ -464,6 +464,33 @@ export const savePaymentSettings = async (provider, payload) => {
   return result.data;
 };
 
+export const loadLoyaltyVoucherServices = async () => {
+  const result = await requestJson('/loyalty-vouchers/services');
+  return Array.isArray(result?.data) ? result.data : [];
+};
+
+export const loadLoyaltyVouchers = async () => {
+  const result = await requestJson('/loyalty-vouchers');
+  return Array.isArray(result?.data) ? result.data : [];
+};
+
+export const createLoyaltyVoucher = async (payload) => {
+  const result = await requestJson('/loyalty-vouchers', {
+    method: 'POST',
+    body: payload,
+  });
+
+  return result.data;
+};
+
+export const redeemLoyaltyVoucher = async (id) => {
+  const result = await requestJson(`/loyalty-vouchers/${encodeURIComponent(String(id))}/redeem`, {
+    method: 'POST',
+  });
+
+  return result.data;
+};
+
 export const loadMaintenanceAssets = async () => {
   const result = await requestJson('/maintenance/assets');
   return Array.isArray(result?.data) ? result.data : [];

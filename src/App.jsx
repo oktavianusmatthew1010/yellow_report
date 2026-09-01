@@ -40,6 +40,10 @@ import {
   loadOutletAssetOutlets,
   loadPaymentSettings,
   savePaymentSettings,
+  loadLoyaltyVoucherServices,
+  loadLoyaltyVouchers,
+  createLoyaltyVoucher,
+  redeemLoyaltyVoucher,
 } from './api';
 import { exportRowsToExcel, exportRowsToPdf } from './reportExport';
 
@@ -71,6 +75,7 @@ const NAV_ITEMS = [
   { label: 'Attendance', icon: 'attendance', path: '/attendance' },
   { label: 'Timetable', icon: 'calendar', path: '/timetable' },
   { label: 'Compliments', icon: 'coupon', path: '/compliments' },
+  { label: 'Loyalty', icon: 'coupon', path: '/loyalty' },
   { label: 'Analytics', icon: 'chart', path: '/analytics' },
   { label: 'AI Assistant', icon: 'bot', path: '/ai-assistant' },
 ];
@@ -4562,6 +4567,156 @@ function BranchStockView({ dashboard }) {
   );
 }
 
+function LoyaltyVoucherView() {
+  const [state, setState] = useState({ vouchers: [], services: [], loading: true, error: '', message: '' });
+  const [form, setForm] = useState({
+    rewardText: '',
+    discountType: 'percent',
+    discountValue: '',
+    serviceId: '',
+    minPurchase: '',
+    startDate: new Date().toISOString().slice(0, 10),
+    endDate: '',
+    usageLimit: 1,
+  });
+  const [saving, setSaving] = useState(false);
+  const [redeemingId, setRedeemingId] = useState(null);
+
+  const reload = async () => {
+    setState((current) => ({ ...current, loading: true }));
+    try {
+      const [vouchers, services] = await Promise.all([loadLoyaltyVouchers(), loadLoyaltyVoucherServices()]);
+      setState({ vouchers, services, loading: false, error: '', message: '' });
+    } catch (error) {
+      setState((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : 'Failed to load loyalty vouchers' }));
+    }
+  };
+
+  useEffect(() => { reload(); }, []);
+
+  const activeCount = state.vouchers.filter((voucher) => voucher.status === 'ACTIVE').length;
+
+  const submitVoucher = async (event) => {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      const voucher = await createLoyaltyVoucher(form);
+      setState((current) => ({ ...current, vouchers: [voucher, ...current.vouchers], message: `Voucher ${voucher.code} created.`, error: '' }));
+      setForm((current) => ({ ...current, rewardText: '', discountValue: '', minPurchase: '', endDate: '' }));
+    } catch (error) {
+      setState((current) => ({ ...current, error: error instanceof Error ? error.message : 'Failed to create voucher', message: '' }));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRedeem = async (voucher) => {
+    setRedeemingId(voucher.id);
+    try {
+      const updated = await redeemLoyaltyVoucher(voucher.id);
+      setState((current) => ({
+        ...current,
+        vouchers: current.vouchers.map((item) => (item.id === updated.id ? updated : item)),
+        message: `${updated.code} redeemed.`,
+        error: '',
+      }));
+    } catch (error) {
+      setState((current) => ({ ...current, error: error instanceof Error ? error.message : 'Failed to redeem voucher', message: '' }));
+    } finally {
+      setRedeemingId(null);
+    }
+  };
+
+  return (
+    <div className="route-grid route-grid-accounting">
+      <section className="panel finance-hero-panel">
+        <div className="panel-head">
+          <div>
+            <div className="panel-title finance-panel-title">LOYALTY VOUCHERS</div>
+            <div className="panel-subtitle mono">GENERATE DISCOUNT VOUCHERS • OPTIONALLY SCOPED TO ONE SERVICE</div>
+          </div>
+        </div>
+
+        <div className="finance-kpi-grid">
+          <article className="finance-kpi-card"><div className="finance-kpi-label mono">TOTAL VOUCHERS</div><div className="finance-kpi-value">{state.vouchers.length}</div><div className="finance-kpi-note">All time</div></article>
+          <article className="finance-kpi-card"><div className="finance-kpi-label mono">ACTIVE</div><div className="finance-kpi-value">{activeCount}</div><div className="finance-kpi-note">Redeemable now</div></article>
+        </div>
+
+        {state.loading ? <div className="finance-empty mono">LOADING LOYALTY VOUCHERS...</div> : null}
+        {state.error ? <div className="finance-empty mono">{state.error}</div> : null}
+        {state.message ? <div className="finance-empty mono">{state.message}</div> : null}
+      </section>
+
+      <section className="panel accounting-form-panel">
+        <div className="panel-title">CREATE VOUCHER</div>
+        <form className="accounting-form" onSubmit={submitVoucher}>
+          <input value={form.rewardText} onChange={(event) => setForm((current) => ({ ...current, rewardText: event.target.value }))} placeholder="Reward text (e.g. 20% OFF CERAMIC WASH)" required />
+          <select value={form.discountType} onChange={(event) => setForm((current) => ({ ...current, discountType: event.target.value }))}>
+            <option value="percent">Percent off</option>
+            <option value="fixed">Fixed amount off</option>
+          </select>
+          <input type="number" min="0" value={form.discountValue} onChange={(event) => setForm((current) => ({ ...current, discountValue: event.target.value }))} placeholder={form.discountType === 'percent' ? 'Discount %' : 'Discount amount (Rp)'} required />
+          <select value={form.serviceId} onChange={(event) => setForm((current) => ({ ...current, serviceId: event.target.value }))}>
+            <option value="">All services</option>
+            {state.services.map((service) => <option key={service.id} value={service.id}>{service.name}</option>)}
+          </select>
+          <input type="number" min="0" value={form.minPurchase} onChange={(event) => setForm((current) => ({ ...current, minPurchase: event.target.value }))} placeholder="Minimum purchase (optional)" />
+          <input type="date" value={form.startDate} onChange={(event) => setForm((current) => ({ ...current, startDate: event.target.value }))} required />
+          <input type="date" value={form.endDate} onChange={(event) => setForm((current) => ({ ...current, endDate: event.target.value }))} required />
+          <input type="number" min="1" value={form.usageLimit} onChange={(event) => setForm((current) => ({ ...current, usageLimit: event.target.value }))} placeholder="Usage limit" />
+          <button type="submit" className="opname-button" disabled={saving}>{saving ? 'Creating' : 'Create Voucher'}</button>
+        </form>
+      </section>
+
+      <section className="panel accounting-wide-panel">
+        <div className="panel-head">
+          <div className="panel-title">VOUCHERS</div>
+          <div className="panel-meta">{state.vouchers.length} TOTAL</div>
+        </div>
+        <div className="report-table-wrap">
+          <table className="report-table">
+            <thead>
+              <tr>
+                <th>Code</th>
+                <th>Reward</th>
+                <th>Discount</th>
+                <th>Service</th>
+                <th>Valid</th>
+                <th>Usage</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {state.vouchers.map((voucher) => (
+                <tr key={voucher.id}>
+                  <td><strong>{voucher.code}</strong></td>
+                  <td>{voucher.rewardText}</td>
+                  <td>{voucher.discountType === 'percent' ? `${voucher.discountValue}%` : formatRupiah(voucher.discountValue)}</td>
+                  <td>{voucher.serviceName || 'All services'}</td>
+                  <td>{voucher.startDate} → {voucher.endDate}</td>
+                  <td>{voucher.usedCount} / {voucher.usageLimit}</td>
+                  <td>{voucher.status}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="opname-button"
+                      disabled={voucher.status !== 'ACTIVE' || redeemingId === voucher.id}
+                      onClick={() => handleRedeem(voucher)}
+                    >
+                      {redeemingId === voucher.id ? 'Redeeming' : 'Redeem'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function SettingsView() {
   const [providers, setProviders] = useState([]);
   const [forms, setForms] = useState({});
@@ -6376,6 +6531,7 @@ function DashboardContent({ session, onLogout }) {
           <Route path="/accounting" element={<AccountingView dashboard={dashboard} />} />
           <Route path="/reports" element={<ReportsView dashboard={dashboard} />} />
           <Route path="/settings" element={<SettingsView />} />
+          <Route path="/loyalty" element={<LoyaltyVoucherView />} />
           <Route path="/hris" element={<HRISView dashboard={dashboard} />} />
           <Route
             path="/attendance"
