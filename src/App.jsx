@@ -38,6 +38,8 @@ import {
   assignStaffSalary,
   loadOutletAssets,
   loadOutletAssetOutlets,
+  loadPaymentSettings,
+  savePaymentSettings,
 } from './api';
 import { exportRowsToExcel, exportRowsToPdf } from './reportExport';
 
@@ -64,6 +66,7 @@ const NAV_ITEMS = [
   { label: 'Finance', icon: 'ledger', path: '/finance' },
   { label: 'Accounting', icon: 'ledger', path: '/accounting' },
   { label: 'Reports', icon: 'ledger', path: '/reports' },
+  { label: 'Settings', icon: 'ledger', path: '/settings' },
   { label: 'HRIS', icon: 'members', path: '/hris' },
   { label: 'Attendance', icon: 'attendance', path: '/attendance' },
   { label: 'Timetable', icon: 'calendar', path: '/timetable' },
@@ -4559,6 +4562,137 @@ function BranchStockView({ dashboard }) {
   );
 }
 
+function SettingsView() {
+  const [providers, setProviders] = useState([]);
+  const [forms, setForms] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [savingProvider, setSavingProvider] = useState(null);
+
+  const reload = async () => {
+    setLoading(true);
+    try {
+      const data = await loadPaymentSettings();
+      setProviders(data);
+      setForms(Object.fromEntries(data.map((provider) => [
+        provider.provider,
+        {
+          mode: provider.mode,
+          apiKey: '',
+          secretKey: '',
+          webhookSecret: '',
+          enabledForPos: provider.enabledForPos,
+          enabledForMobile: provider.enabledForMobile,
+        },
+      ])));
+      setLoading(false);
+      setError('');
+    } catch (err) {
+      setLoading(false);
+      setError(err instanceof Error ? err.message : 'Failed to load payment settings');
+    }
+  };
+
+  useEffect(() => { reload(); }, []);
+
+  const updateForm = (provider, patch) => setForms((current) => ({ ...current, [provider]: { ...current[provider], ...patch } }));
+
+  const submitProvider = async (provider) => {
+    setSavingProvider(provider);
+    try {
+      const form = forms[provider] || {};
+      const payload = {
+        mode: form.mode,
+        enabledForPos: Boolean(form.enabledForPos),
+        enabledForMobile: Boolean(form.enabledForMobile),
+      };
+      if (form.apiKey) payload.apiKey = form.apiKey;
+      if (form.secretKey) payload.secretKey = form.secretKey;
+      if (form.webhookSecret) payload.webhookSecret = form.webhookSecret;
+
+      await savePaymentSettings(provider, payload);
+      setMessage(`${provider.toUpperCase()} settings saved.`);
+      setError('');
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save payment settings');
+    } finally {
+      setSavingProvider(null);
+    }
+  };
+
+  return (
+    <div className="route-grid route-grid-accounting">
+      <section className="panel finance-hero-panel">
+        <div className="panel-head">
+          <div>
+            <div className="panel-title finance-panel-title">SETTINGS</div>
+            <div className="panel-subtitle mono">PAYMENT INTEGRATIONS • POS & MOBILE MEMBER CHECKOUT</div>
+          </div>
+        </div>
+        {loading ? <div className="finance-empty mono">LOADING SETTINGS...</div> : null}
+        {error ? <div className="finance-empty mono">{error}</div> : null}
+        {message ? <div className="finance-empty mono">{message}</div> : null}
+      </section>
+
+      {providers.map((provider) => {
+        const form = forms[provider.provider] || {};
+        return (
+          <section className="panel accounting-form-panel" key={provider.provider}>
+            <div className="panel-head">
+              <div className="panel-title">{provider.provider.toUpperCase()}</div>
+              <div className="panel-meta">{provider.configured ? 'CONFIGURED' : 'NOT CONFIGURED'}</div>
+            </div>
+            <form
+              className="accounting-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                submitProvider(provider.provider);
+              }}
+            >
+              <select value={form.mode || 'sandbox'} onChange={(event) => updateForm(provider.provider, { mode: event.target.value })}>
+                <option value="sandbox">Sandbox</option>
+                <option value="live">Live</option>
+              </select>
+              {provider.provider === 'stripe' ? (
+                <input
+                  value={form.apiKey || ''}
+                  onChange={(event) => updateForm(provider.provider, { apiKey: event.target.value })}
+                  placeholder={provider.apiKey ? `Publishable key (${provider.apiKey})` : 'Publishable key (pk_...)'}
+                />
+              ) : null}
+              <input
+                value={form.secretKey || ''}
+                onChange={(event) => updateForm(provider.provider, { secretKey: event.target.value })}
+                placeholder={provider.secretKey ? `Secret key (${provider.secretKey})` : 'Secret key'}
+                type="password"
+              />
+              <input
+                value={form.webhookSecret || ''}
+                onChange={(event) => updateForm(provider.provider, { webhookSecret: event.target.value })}
+                placeholder={provider.webhookSecret ? `Webhook secret (${provider.webhookSecret})` : 'Webhook secret (optional)'}
+                type="password"
+              />
+              <label className="settings-toggle-row mono">
+                <input type="checkbox" checked={Boolean(form.enabledForPos)} onChange={(event) => updateForm(provider.provider, { enabledForPos: event.target.checked })} />
+                Enable for POS checkout
+              </label>
+              <label className="settings-toggle-row mono">
+                <input type="checkbox" checked={Boolean(form.enabledForMobile)} onChange={(event) => updateForm(provider.provider, { enabledForMobile: event.target.checked })} />
+                Enable for Mobile Member
+              </label>
+              <button type="submit" className="opname-button" disabled={savingProvider === provider.provider}>
+                {savingProvider === provider.provider ? 'Saving' : 'Save'}
+              </button>
+            </form>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 function HRISView() {
   const [state, setState] = useState({ staff: [], scales: [], assignments: [], loading: true, error: '', message: '' });
   const [scaleForm, setScaleForm] = useState({ positionName: '', gajiPokok: '', uangMakan: '', transport: '', kerajinanWeekly: '' });
@@ -6241,6 +6375,7 @@ function DashboardContent({ session, onLogout }) {
           <Route path="/finance" element={<FinanceView dashboard={dashboard} />} />
           <Route path="/accounting" element={<AccountingView dashboard={dashboard} />} />
           <Route path="/reports" element={<ReportsView dashboard={dashboard} />} />
+          <Route path="/settings" element={<SettingsView />} />
           <Route path="/hris" element={<HRISView dashboard={dashboard} />} />
           <Route
             path="/attendance"

@@ -450,6 +450,20 @@ export const loadOutletAssetOutlets = async () => {
   return Array.isArray(result?.data) ? result.data : [];
 };
 
+export const loadPaymentSettings = async () => {
+  const result = await requestJson('/payment-settings');
+  return Array.isArray(result?.data) ? result.data : [];
+};
+
+export const savePaymentSettings = async (provider, payload) => {
+  const result = await requestJson(`/payment-settings/${encodeURIComponent(provider)}`, {
+    method: 'PUT',
+    body: payload,
+  });
+
+  return result.data;
+};
+
 export const loadMaintenanceAssets = async () => {
   const result = await requestJson('/maintenance/assets');
   return Array.isArray(result?.data) ? result.data : [];
