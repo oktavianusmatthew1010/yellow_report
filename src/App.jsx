@@ -37,6 +37,7 @@ import {
   cancelPurchaseOrder,
   loadMaintenanceAssets,
   loadAttendanceReport,
+  loadAttendanceEventsForLocation,
   loadSalaryScales,
   createSalaryScale,
   loadSalaryAssignments,
@@ -5200,11 +5201,82 @@ function SettingsView({ dashboard }) {
   );
 }
 
+const getPayrollWeeks = (monthStr) => {
+  const [yearStr, monthNumStr] = String(monthStr || '').split('-');
+  const year = Number(yearStr);
+  const monthIndex = Number(monthNumStr) - 1;
+  if (!Number.isFinite(year) || !Number.isFinite(monthIndex)) return [];
+
+  const lastDay = new Date(year, monthIndex + 1, 0).getDate();
+  return [[1, 8], [9, 15], [16, 23], [24, lastDay]]
+    .filter(([start]) => start <= lastDay)
+    .map(([start, end], index) => ({
+      label: `Minggu ${index + 1}`,
+      start: new Date(year, monthIndex, start),
+      end: new Date(year, monthIndex, Math.min(end, lastDay)),
+    }));
+};
+
+const buildDailyPresenceMap = (events = []) => {
+  const byUserDate = new Map();
+
+  events.forEach((event) => {
+    const userId = event?.user?.id;
+    if (userId == null || !event?.datetime) return;
+
+    const dateKey = String(event.datetime).slice(0, 10);
+    const mapKey = `${userId}|${dateKey}`;
+    const current = byUserDate.get(mapKey) || { hasClockIn: false, hasClockOut: false };
+    const status = Number(event.status);
+    if (status === 1) current.hasClockIn = true;
+    if (status === 0) current.hasClockOut = true;
+    byUserDate.set(mapKey, current);
+  });
+
+  return byUserDate;
+};
+
+const computeStaffPayrollForMonth = (staffId, salary, presenceMap, weeks, today) => {
+  let daysPresent = 0;
+  let weeksEarned = 0;
+  let weeksEvaluated = 0;
+
+  weeks.forEach((week) => {
+    let elapsedDays = 0;
+    let completeDays = 0;
+
+    for (let day = new Date(week.start); day <= week.end; day.setDate(day.getDate() + 1)) {
+      if (day > today) continue;
+      elapsedDays += 1;
+      const record = presenceMap.get(`${staffId}|${toYmd(day)}`);
+      if (record?.hasClockIn && record?.hasClockOut) {
+        completeDays += 1;
+        daysPresent += 1;
+      }
+    }
+
+    if (elapsedDays > 0) {
+      weeksEvaluated += 1;
+      if (completeDays === elapsedDays) weeksEarned += 1;
+    }
+  });
+
+  const gajiPokok = Number(salary?.gajiPokok || 0);
+  const uangMakan = Number(salary?.uangMakan || 0);
+  const transport = Number(salary?.transport || 0);
+  const kerajinanEarned = weeksEarned * Number(salary?.kerajinanWeekly || 0);
+  const totalGajiPeriod = gajiPokok + uangMakan + transport + kerajinanEarned;
+
+  return { daysPresent, weeksEarned, weeksEvaluated, gajiPokok, uangMakan, transport, kerajinanEarned, totalGajiPeriod };
+};
+
 function HRISView() {
   const [state, setState] = useState({ staff: [], scales: [], assignments: [], loading: true, error: '', message: '' });
   const [scaleForm, setScaleForm] = useState({ positionName: '', gajiPokok: '', uangMakan: '', transport: '', kerajinanWeekly: '' });
   const [savingScale, setSavingScale] = useState(false);
   const [savingStaffId, setSavingStaffId] = useState(null);
+  const [payrollMonth, setPayrollMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [payroll, setPayroll] = useState({ loading: false, error: '', rows: [], generatedFor: '' });
 
   const reload = async () => {
     const [staff, scales, assignments] = await Promise.all([loadClocksterStaff(), loadSalaryScales(), loadSalaryAssignments()]);
@@ -5268,6 +5340,49 @@ function HRISView() {
       setSavingStaffId(null);
     }
   };
+
+  const handleCalculatePayroll = async () => {
+    setPayroll((current) => ({ ...current, loading: true, error: '' }));
+    try {
+      const weeks = getPayrollWeeks(payrollMonth);
+      if (!weeks.length) throw new Error('Select a valid month');
+
+      const monthStart = weeks[0].start;
+      const monthEnd = weeks[weeks.length - 1].end;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const assignedStaff = state.staff.filter((person) => assignmentByStaffId.get(person.id));
+      const locationIds = [...new Set(assignedStaff.map((person) => person.location?.id).filter((id) => id != null))];
+
+      const eventBatches = await Promise.all(
+        (locationIds.length ? locationIds : ['17526']).map((locationId) => loadAttendanceEventsForLocation({
+          locationId,
+          startDate: toYmd(monthStart),
+          endDate: toYmd(monthEnd),
+        }))
+      );
+      const presenceMap = buildDailyPresenceMap(eventBatches.flat());
+
+      const rows = assignedStaff.map((person) => {
+        const assignment = assignmentByStaffId.get(person.id);
+        const result = computeStaffPayrollForMonth(person.id, assignment.salary, presenceMap, weeks, today);
+        return {
+          staffId: person.id,
+          name: [person.first_name, person.last_name].filter(Boolean).join(' ') || `Staff ${person.id}`,
+          branch: person.location?.title || 'Unassigned',
+          positionName: assignment.positionName,
+          ...result,
+        };
+      });
+
+      setPayroll({ loading: false, error: '', rows, generatedFor: payrollMonth });
+    } catch (error) {
+      setPayroll((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : 'Failed to calculate payroll' }));
+    }
+  };
+
+  const totalPayrollForPeriod = payroll.rows.reduce((sum, row) => sum + row.totalGajiPeriod, 0);
 
   return (
     <div className="route-grid route-grid-accounting">
@@ -5416,6 +5531,74 @@ function HRISView() {
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section className="panel accounting-wide-panel">
+        <div className="panel-head">
+          <div>
+            <div className="panel-title">HITUNG GAJI (PAYROLL)</div>
+            <div className="panel-subtitle mono">GAJI POKOK PENUH SETIAP BULAN • KERAJINAN PER MINGGU (1-8, 9-15, 16-23, 24-AKHIR BULAN) DIBAYAR PENUH HANYA JIKA TIDAK ADA HARI TANPA CLOCK-IN &amp; CLOCK-OUT LENGKAP DI MINGGU TSB</div>
+          </div>
+          <div className="panel-meta">{payroll.rows.length ? `${formatRupiah(totalPayrollForPeriod)} TOTAL` : ''}</div>
+        </div>
+        <form
+          className="accounting-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            handleCalculatePayroll();
+          }}
+        >
+          <input
+            type="month"
+            value={payrollMonth}
+            onChange={(event) => setPayrollMonth(event.target.value)}
+          />
+          <button type="submit" className="opname-button" disabled={payroll.loading}>
+            {payroll.loading ? 'Menghitung...' : 'Hitung Gaji'}
+          </button>
+        </form>
+
+        {payroll.error ? <div className="finance-empty mono">{payroll.error}</div> : null}
+        {!payroll.loading && !payroll.error && payroll.generatedFor && !payroll.rows.length ? (
+          <div className="finance-empty mono">No staff with an assigned salary position yet.</div>
+        ) : null}
+
+        {payroll.rows.length ? (
+          <div className="report-table-wrap">
+            <table className="report-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Branch</th>
+                  <th>Position</th>
+                  <th>Days Present</th>
+                  <th>Kerajinan Weeks</th>
+                  <th>Gaji Pokok</th>
+                  <th>Uang Makan</th>
+                  <th>Transport</th>
+                  <th>Uang Kerajinan</th>
+                  <th>Total Gaji</th>
+                </tr>
+              </thead>
+              <tbody>
+                {payroll.rows.map((row) => (
+                  <tr key={row.staffId}>
+                    <td><strong>{row.name}</strong></td>
+                    <td>{row.branch}</td>
+                    <td>{row.positionName}</td>
+                    <td>{row.daysPresent}</td>
+                    <td>{row.weeksEarned}/{row.weeksEvaluated}</td>
+                    <td>{formatRupiah(row.gajiPokok)}</td>
+                    <td>{formatRupiah(row.uangMakan)}</td>
+                    <td>{formatRupiah(row.transport)}</td>
+                    <td>{formatRupiah(row.kerajinanEarned)}</td>
+                    <td>{formatRupiah(row.totalGajiPeriod)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
       </section>
     </div>
   );

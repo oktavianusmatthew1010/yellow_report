@@ -600,6 +600,29 @@ export const loadAttendanceReport = async ({ branch, startDate, endDate, limit =
   return records;
 };
 
+export const loadAttendanceEventsForLocation = async ({ locationId, startDate, endDate, limit = 200 } = {}) => {
+  const records = [];
+  let page = 1;
+  let totalPages = 1;
+
+  do {
+    const query = new URLSearchParams({
+      date_start: startDate,
+      date_end: endDate,
+      locations: String(locationId || '17526'),
+      page: String(page),
+      limit: String(limit),
+    });
+
+    const result = await requestJson(`/attendance?${query.toString()}`);
+    records.push(...(Array.isArray(result?.data) ? result.data : []));
+    totalPages = Number(result?.meta?.last_page || result?.last_page || 1);
+    page += 1;
+  } while (page <= totalPages);
+
+  return records;
+};
+
 export const loginStaff = async ({ identifier, email, password }) => {
   const loginIdentifier = String(identifier || email || '').trim();
   const response = await fetch(`${getApiBaseUrl()}/auth/login`, {
