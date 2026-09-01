@@ -33,7 +33,8 @@ import {
   loadAttendanceReport,
   loadSalaryScales,
   createSalaryScale,
-  loadHrStaff,
+  loadSalaryAssignments,
+  loadClocksterStaff,
   assignStaffSalary,
   loadOutletAssets,
   loadOutletAssetOutlets,
@@ -4456,30 +4457,37 @@ function BranchStockView({ dashboard }) {
   );
 }
 
-function HRISView({ dashboard }) {
-  const branches = Array.isArray(dashboard?.branchLocations) ? dashboard.branchLocations : [];
-  const [state, setState] = useState({ staff: [], scales: [], loading: true, error: '', message: '' });
+function HRISView() {
+  const [state, setState] = useState({ staff: [], scales: [], assignments: [], loading: true, error: '', message: '' });
   const [scaleForm, setScaleForm] = useState({ positionName: '', gajiPokok: '', uangMakan: '', transport: '', kerajinanWeekly: '' });
   const [savingScale, setSavingScale] = useState(false);
   const [savingStaffId, setSavingStaffId] = useState(null);
 
   const reload = async () => {
-    const [staff, scales] = await Promise.all([loadHrStaff(), loadSalaryScales()]);
-    setState({ staff, scales, loading: false, error: '', message: '' });
+    const [staff, scales, assignments] = await Promise.all([loadClocksterStaff(), loadSalaryScales(), loadSalaryAssignments()]);
+    setState({ staff, scales, assignments, loading: false, error: '', message: '' });
   };
 
   useEffect(() => {
     reload().catch((error) => setState((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : 'Failed to load HRIS' })));
   }, []);
 
-  const branchLabel = (locationId) => {
-    const branch = branches.find((item) => String(getBranchStoreId(item) ?? '') === String(locationId));
-    return branch ? (branch.code || branch.name) : (locationId ? `Location ${locationId}` : 'Unassigned');
-  };
+  const assignmentByStaffId = useMemo(
+    () => new Map(state.assignments.map((assignment) => [assignment.staffId, assignment])),
+    [state.assignments]
+  );
 
-  const activeStaffCount = state.staff.filter((staff) => staff.isActive).length;
-  const unassignedCount = state.staff.filter((staff) => !staff.salaryScaleId).length;
-  const totalMonthlyPayroll = state.staff.reduce((sum, staff) => sum + Number(staff.salary?.totalGaji || 0), 0);
+  const branchBreakdown = useMemo(() => {
+    const counts = new Map();
+    state.staff.forEach((person) => {
+      const label = person.location?.title || 'Unassigned';
+      counts.set(label, (counts.get(label) || 0) + 1);
+    });
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [state.staff]);
+
+  const unassignedCount = state.staff.filter((person) => !assignmentByStaffId.get(person.id)).length;
+  const totalMonthlyPayroll = state.assignments.reduce((sum, assignment) => sum + Number(assignment.salary?.totalGaji || 0), 0);
 
   const submitScale = async (event) => {
     event.preventDefault();
@@ -4504,9 +4512,13 @@ function HRISView({ dashboard }) {
     if (!salaryScaleId) return;
     setSavingStaffId(staffId);
     try {
-      await assignStaffSalary(staffId, Number(salaryScaleId));
-      const staff = await loadHrStaff();
-      setState((current) => ({ ...current, staff, message: 'Salary assigned.', error: '' }));
+      const assignment = await assignStaffSalary(staffId, Number(salaryScaleId));
+      setState((current) => ({
+        ...current,
+        assignments: [...current.assignments.filter((a) => a.staffId !== staffId), assignment],
+        message: 'Salary assigned.',
+        error: '',
+      }));
     } catch (error) {
       setState((current) => ({ ...current, error: error instanceof Error ? error.message : 'Failed to assign salary', message: '' }));
     } finally {
@@ -4520,20 +4532,45 @@ function HRISView({ dashboard }) {
         <div className="panel-head">
           <div>
             <div className="panel-title finance-panel-title">HRIS</div>
-            <div className="panel-subtitle mono">STAFF DIRECTORY • SALARY SCALE BY POSITION</div>
+            <div className="panel-subtitle mono">EMPLOYEE DIRECTORY (CLOCKSTER) • SALARY SCALE BY POSITION</div>
           </div>
         </div>
 
         <div className="finance-kpi-grid">
-          <article className="finance-kpi-card"><div className="finance-kpi-label mono">TOTAL STAFF</div><div className="finance-kpi-value">{state.staff.length}</div><div className="finance-kpi-note">{activeStaffCount} active</div></article>
-          <article className="finance-kpi-card"><div className="finance-kpi-label mono">SALARY POSITIONS</div><div className="finance-kpi-value">{state.scales.length}</div><div className="finance-kpi-note">Imported pay scale</div></article>
-          <article className="finance-kpi-card"><div className="finance-kpi-label mono">UNASSIGNED</div><div className="finance-kpi-value">{unassignedCount}</div><div className="finance-kpi-note">Staff without a position set</div></article>
+          <article className="finance-kpi-card"><div className="finance-kpi-label mono">TOTAL STAFF</div><div className="finance-kpi-value">{state.staff.length}</div><div className="finance-kpi-note">From Clockster</div></article>
+          <article className="finance-kpi-card"><div className="finance-kpi-label mono">BRANCHES</div><div className="finance-kpi-value">{branchBreakdown.length}</div><div className="finance-kpi-note">Distinct locations</div></article>
+          <article className="finance-kpi-card"><div className="finance-kpi-label mono">UNASSIGNED</div><div className="finance-kpi-value">{unassignedCount}</div><div className="finance-kpi-note">Staff without a salary position set</div></article>
           <article className="finance-kpi-card"><div className="finance-kpi-label mono">MONTHLY PAYROLL</div><div className="finance-kpi-value">{formatRupiah(totalMonthlyPayroll)}</div><div className="finance-kpi-note">Assigned staff only</div></article>
         </div>
 
-        {state.loading ? <div className="finance-empty mono">LOADING HRIS...</div> : null}
+        {state.loading ? <div className="finance-empty mono">LOADING HRIS FROM CLOCKSTER...</div> : null}
         {state.error ? <div className="finance-empty mono">{state.error}</div> : null}
         {state.message ? <div className="finance-empty mono">{state.message}</div> : null}
+      </section>
+
+      <section className="panel accounting-wide-panel">
+        <div className="panel-head">
+          <div className="panel-title">STAFF PER BRANCH</div>
+          <div className="panel-meta">{branchBreakdown.length} LOCATIONS</div>
+        </div>
+        <div className="report-table-wrap">
+          <table className="report-table">
+            <thead>
+              <tr>
+                <th>Branch / Location</th>
+                <th>Headcount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {branchBreakdown.map(([label, count]) => (
+                <tr key={label}>
+                  <td><strong>{label}</strong></td>
+                  <td>{count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section className="panel accounting-form-panel">
@@ -4591,11 +4628,12 @@ function HRISView({ dashboard }) {
           <table className="report-table">
             <thead>
               <tr>
-                <th>Staff No</th>
+                <th>Code</th>
                 <th>Name</th>
-                <th>Branch</th>
-                <th>Status</th>
-                <th>Position</th>
+                <th>Branch / Location</th>
+                <th>Department</th>
+                <th>Clockster Position</th>
+                <th>Salary Position</th>
                 <th>Gaji Pokok</th>
                 <th>Uang Makan</th>
                 <th>Transport</th>
@@ -4604,29 +4642,34 @@ function HRISView({ dashboard }) {
               </tr>
             </thead>
             <tbody>
-              {state.staff.map((staff) => (
-                <tr key={staff.staffId}>
-                  <td>{staff.staffno}</td>
-                  <td><strong>{staff.staffname}</strong></td>
-                  <td>{branchLabel(staff.locationid)}</td>
-                  <td>{staff.isActive ? 'Active' : 'Resigned'}</td>
-                  <td>
-                    <select
-                      value={staff.salaryScaleId ?? ''}
-                      disabled={savingStaffId === staff.staffId}
-                      onChange={(event) => handleAssign(staff.staffId, event.target.value)}
-                    >
-                      <option value="">Not set</option>
-                      {state.scales.map((scale) => <option key={scale.id} value={scale.id}>{scale.positionName}</option>)}
-                    </select>
-                  </td>
-                  <td>{staff.salary ? formatRupiah(staff.salary.gajiPokok) : '-'}</td>
-                  <td>{staff.salary ? formatRupiah(staff.salary.uangMakan) : '-'}</td>
-                  <td>{staff.salary ? formatRupiah(staff.salary.transport) : '-'}</td>
-                  <td>{staff.salary ? formatRupiah(staff.salary.kerajinanWeekly) : '-'}</td>
-                  <td>{staff.salary ? formatRupiah(staff.salary.totalGaji) : '-'}</td>
-                </tr>
-              ))}
+              {state.staff.map((person) => {
+                const assignment = assignmentByStaffId.get(person.id);
+                const salary = assignment?.salary;
+                return (
+                  <tr key={person.id}>
+                    <td>{person.code}</td>
+                    <td><strong>{[person.first_name, person.last_name].filter(Boolean).join(' ')}</strong></td>
+                    <td>{person.location?.title || 'Unassigned'}</td>
+                    <td>{person.department?.title || '-'}</td>
+                    <td>{person.position?.title || '-'}</td>
+                    <td>
+                      <select
+                        value={assignment?.salaryScaleId ?? ''}
+                        disabled={savingStaffId === person.id}
+                        onChange={(event) => handleAssign(person.id, event.target.value)}
+                      >
+                        <option value="">Not set</option>
+                        {state.scales.map((scale) => <option key={scale.id} value={scale.id}>{scale.positionName}</option>)}
+                      </select>
+                    </td>
+                    <td>{salary ? formatRupiah(salary.gajiPokok) : '-'}</td>
+                    <td>{salary ? formatRupiah(salary.uangMakan) : '-'}</td>
+                    <td>{salary ? formatRupiah(salary.transport) : '-'}</td>
+                    <td>{salary ? formatRupiah(salary.kerajinanWeekly) : '-'}</td>
+                    <td>{salary ? formatRupiah(salary.totalGaji) : '-'}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

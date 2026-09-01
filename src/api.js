@@ -407,9 +407,24 @@ export const createSalaryScale = async (payload) => {
   return result.data;
 };
 
-export const loadHrStaff = async () => {
-  const result = await requestJson('/hr/staff');
+export const loadSalaryAssignments = async () => {
+  const result = await requestJson('/hr/salary-assignments');
   return Array.isArray(result?.data) ? result.data : [];
+};
+
+export const loadClocksterStaff = async () => {
+  const staff = [];
+  let page = 1;
+  let totalPages = 1;
+
+  do {
+    const result = await requestJson(`/clockster/users?page=${page}`);
+    staff.push(...(Array.isArray(result?.data) ? result.data : []));
+    totalPages = Number(result?.meta?.last_page || 1);
+    page += 1;
+  } while (page <= totalPages);
+
+  return staff;
 };
 
 export const assignStaffSalary = async (staffId, salaryScaleId) => {
