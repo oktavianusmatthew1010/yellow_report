@@ -37,7 +37,7 @@ import {
   cancelPurchaseOrder,
   loadMaintenanceAssets,
   loadAttendanceReport,
-  loadAttendanceEventsForLocation,
+  loadAttendanceReportForLocation,
   loadSalaryScales,
   createSalaryScale,
   loadSalaryAssignments,
@@ -5217,20 +5217,20 @@ const getPayrollWeeks = (monthStr) => {
     }));
 };
 
-const buildDailyPresenceMap = (events = []) => {
+const buildDailyPresenceMap = (reportEntries = []) => {
   const byUserDate = new Map();
 
-  events.forEach((event) => {
-    const userId = event?.user?.id;
-    if (userId == null || !event?.datetime) return;
+  reportEntries.forEach((entry) => {
+    const userId = entry?.user?.id;
+    const dates = entry?.dates;
+    if (userId == null || !dates) return;
 
-    const dateKey = String(event.datetime).slice(0, 10);
-    const mapKey = `${userId}|${dateKey}`;
-    const current = byUserDate.get(mapKey) || { hasClockIn: false, hasClockOut: false };
-    const status = Number(event.status);
-    if (status === 1) current.hasClockIn = true;
-    if (status === 0) current.hasClockOut = true;
-    byUserDate.set(mapKey, current);
+    Object.entries(dates).forEach(([dateKey, day]) => {
+      byUserDate.set(`${userId}|${dateKey}`, {
+        hasClockIn: Boolean(day?.in),
+        hasClockOut: Boolean(day?.out),
+      });
+    });
   });
 
   return byUserDate;
@@ -5355,14 +5355,14 @@ function HRISView() {
       const assignedStaff = state.staff.filter((person) => assignmentByStaffId.get(person.id));
       const locationIds = [...new Set(assignedStaff.map((person) => person.location?.id).filter((id) => id != null))];
 
-      const eventBatches = await Promise.all(
-        (locationIds.length ? locationIds : ['17526']).map((locationId) => loadAttendanceEventsForLocation({
+      const reportBatches = await Promise.all(
+        (locationIds.length ? locationIds : ['17526']).map((locationId) => loadAttendanceReportForLocation({
           locationId,
           startDate: toYmd(monthStart),
           endDate: toYmd(monthEnd),
         }))
       );
-      const presenceMap = buildDailyPresenceMap(eventBatches.flat());
+      const presenceMap = buildDailyPresenceMap(reportBatches.flat());
 
       const rows = assignedStaff.map((person) => {
         const assignment = assignmentByStaffId.get(person.id);
