@@ -35,6 +35,8 @@ import {
   createSalaryScale,
   loadHrStaff,
   assignStaffSalary,
+  loadOutletAssets,
+  loadOutletAssetOutlets,
 } from './api';
 import { exportRowsToExcel, exportRowsToPdf } from './reportExport';
 
@@ -4638,7 +4640,8 @@ const REPORT_TYPES = [
   { key: 'accounting', label: 'Accounting', needsBranch: true, needsDate: true, hint: 'Posted journal entries per branch and date range.' },
   { key: 'stock', label: 'Stock', needsBranch: true, needsDate: true, hint: 'Inter-branch stock transfers over a date range.' },
   { key: 'inventory', label: 'Inventory', needsBranch: true, needsDate: false, hint: 'Current inventory snapshot per branch.' },
-  { key: 'asset', label: 'Asset', needsBranch: false, needsDate: false, hint: 'Equipment and asset registry.' },
+  { key: 'asset', label: 'Equipment', needsBranch: false, needsDate: false, hint: 'Maintenance-tracked equipment registry (serial numbers, purchase info).' },
+  { key: 'outlet-assets', label: 'Outlet Assets', needsBranch: false, needsDate: false, needsOutlet: true, hint: 'Fixed asset register per outlet, imported from NEW DATA ASET OUTLET.xlsx.' },
   { key: 'attendance', label: 'Attendance', needsBranch: true, needsDate: true, hint: 'Staff clock-in / clock-out events per branch and date range.' },
 ];
 
@@ -4649,6 +4652,8 @@ function ReportsView({ dashboard }) {
   const [branchId, setBranchId] = useState('');
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
+  const [outlet, setOutlet] = useState('');
+  const [outletOptions, setOutletOptions] = useState([]);
   const [rows, setRows] = useState([]);
   const [columns, setColumns] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -4657,6 +4662,12 @@ function ReportsView({ dashboard }) {
 
   const activeType = REPORT_TYPES.find((type) => type.key === reportType) || REPORT_TYPES[0];
   const selectedBranch = branches.find((branch) => String(getBranchStoreId(branch) ?? '') === String(branchId)) || null;
+
+  useEffect(() => {
+    if (activeType.needsOutlet && outletOptions.length === 0) {
+      loadOutletAssetOutlets().then(setOutletOptions).catch(() => setOutletOptions([]));
+    }
+  }, [activeType.needsOutlet, outletOptions.length]);
 
   const branchLabel = (id) => {
     const branch = branches.find((item) => String(getBranchStoreId(item) ?? '') === String(id));
@@ -4779,6 +4790,24 @@ function ReportsView({ dashboard }) {
           purchaseDate: asset.purchaseDate || '',
           purchasePrice: Number(asset.purchasePrice || 0),
         }));
+      } else if (reportType === 'outlet-assets') {
+        const assets = await loadOutletAssets({ outlet: outlet || undefined });
+        nextColumns = [
+          { key: 'outlet', label: 'Outlet' },
+          { key: 'section', label: 'Section' },
+          { key: 'itemName', label: 'Item Name' },
+          { key: 'quantity', label: 'Quantity' },
+          { key: 'unit', label: 'Unit' },
+          { key: 'notes', label: 'Notes / Condition' },
+        ];
+        nextRows = assets.map((asset) => ({
+          outlet: asset.outlet,
+          section: asset.section || '',
+          itemName: asset.itemName,
+          quantity: Number(asset.quantity || 0),
+          unit: asset.unit || '',
+          notes: asset.notes || '',
+        }));
       } else if (reportType === 'attendance') {
         if (!selectedBranch) {
           throw new Error('Select a branch to generate the attendance report');
@@ -4873,6 +4902,12 @@ function ReportsView({ dashboard }) {
                   {branch.name || branch.code || `Branch ${index + 1}`}
                 </option>
               ))}
+            </select>
+          ) : null}
+          {activeType.needsOutlet ? (
+            <select value={outlet} onChange={(event) => setOutlet(event.target.value)}>
+              <option value="">All outlets</option>
+              {outletOptions.map((name) => <option key={name} value={name}>{name}</option>)}
             </select>
           ) : null}
           {activeType.needsDate ? (

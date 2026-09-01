@@ -421,6 +421,20 @@ export const assignStaffSalary = async (staffId, salaryScaleId) => {
   return result.data;
 };
 
+export const loadOutletAssets = async ({ outlet } = {}) => {
+  const params = new URLSearchParams();
+  if (outlet) params.set('outlet', outlet);
+  const query = params.toString();
+  const result = await requestJson(`/outlet-assets${query ? `?${query}` : ''}`);
+
+  return Array.isArray(result?.data) ? result.data : [];
+};
+
+export const loadOutletAssetOutlets = async () => {
+  const result = await requestJson('/outlet-assets/outlets');
+  return Array.isArray(result?.data) ? result.data : [];
+};
+
 export const loadMaintenanceAssets = async () => {
   const result = await requestJson('/maintenance/assets');
   return Array.isArray(result?.data) ? result.data : [];
