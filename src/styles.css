@@ -1575,6 +1575,62 @@ button {
   font-weight: 800;
 }
 
+.report-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.report-tab {
+  min-height: 34px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 209, 28, 0.24);
+  background: rgba(4, 13, 26, 0.55);
+  color: var(--text-dim);
+  font-size: 0.76rem;
+  font-weight: 700;
+  border-radius: 999px;
+}
+
+.report-tab-active {
+  border-color: rgba(255, 209, 28, 0.55);
+  background: rgba(255, 209, 28, 0.14);
+  color: var(--yellow);
+}
+
+.report-table-wrap {
+  overflow-x: auto;
+  margin-top: 14px;
+  border: 1px solid rgba(255, 209, 28, 0.14);
+}
+
+.report-table {
+  width: 100%;
+  min-width: 700px;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.report-table thead {
+  background: rgba(4, 13, 26, 0.55);
+  color: #dccda7;
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+}
+
+.report-table th,
+.report-table td {
+  padding: 11px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.report-table tbody tr {
+  border-top: 1px solid rgba(255, 209, 28, 0.1);
+  color: var(--text-dim);
+}
+
 .opname-button:disabled {
   opacity: 0.45;
   cursor: not-allowed;

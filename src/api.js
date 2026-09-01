@@ -393,6 +393,45 @@ export const loadStockTransfers = async ({ branchId } = {}) => {
   return Array.isArray(result?.data) ? result.data : [];
 };
 
+export const loadMaintenanceAssets = async () => {
+  const result = await requestJson('/maintenance/assets');
+  return Array.isArray(result?.data) ? result.data : [];
+};
+
+export const loadAttendanceReport = async ({ branch, startDate, endDate, limit = 200 } = {}) => {
+  const locationId = String(
+    branch?.clocksterId
+      || branch?.raw?.clockster_id
+      || branch?.raw?.clocksterId
+      || branch?.raw?.clockster_location_id
+      || branch?.raw?.clocksterLocationId
+      || branch?.raw?.location_id
+      || branch?.raw?.locationid
+      || '17526'
+  );
+
+  const records = [];
+  let page = 1;
+  let totalPages = 1;
+
+  do {
+    const query = new URLSearchParams({
+      date_start: startDate,
+      date_end: endDate,
+      locations: locationId,
+      page: String(page),
+      limit: String(limit),
+    });
+
+    const result = await requestJson(`/attendance?${query.toString()}`);
+    records.push(...(Array.isArray(result?.data) ? result.data : []));
+    totalPages = Number(result?.meta?.last_page || result?.last_page || 1);
+    page += 1;
+  } while (page <= totalPages);
+
+  return records;
+};
+
 export const loginStaff = async ({ identifier, email, password }) => {
   const loginIdentifier = String(identifier || email || '').trim();
   const response = await fetch(`${getApiBaseUrl()}/auth/login`, {

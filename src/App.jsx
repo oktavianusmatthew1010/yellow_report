@@ -29,7 +29,10 @@ import {
   addBranchStock,
   transferBranchStock,
   loadStockTransfers,
+  loadMaintenanceAssets,
+  loadAttendanceReport,
 } from './api';
+import { exportRowsToExcel, exportRowsToPdf } from './reportExport';
 
 const DEFAULT_LOGIN = {
   identifier: 'admin@yellocarwash.com',
@@ -53,6 +56,7 @@ const NAV_ITEMS = [
   { label: 'Branch Stock', icon: 'inventory', path: '/branch-stock' },
   { label: 'Finance', icon: 'ledger', path: '/finance' },
   { label: 'Accounting', icon: 'ledger', path: '/accounting' },
+  { label: 'Reports', icon: 'ledger', path: '/reports' },
   { label: 'Attendance', icon: 'attendance', path: '/attendance' },
   { label: 'Timetable', icon: 'calendar', path: '/timetable' },
   { label: 'Compliments', icon: 'coupon', path: '/compliments' },
@@ -4445,6 +4449,288 @@ function BranchStockView({ dashboard }) {
   );
 }
 
+const REPORT_TYPES = [
+  { key: 'transactions', label: 'Transactions', needsBranch: true, needsDate: true, hint: 'Orders and payments per branch and date range.' },
+  { key: 'accounting', label: 'Accounting', needsBranch: true, needsDate: true, hint: 'Posted journal entries per branch and date range.' },
+  { key: 'stock', label: 'Stock', needsBranch: true, needsDate: true, hint: 'Inter-branch stock transfers over a date range.' },
+  { key: 'inventory', label: 'Inventory', needsBranch: true, needsDate: false, hint: 'Current inventory snapshot per branch.' },
+  { key: 'asset', label: 'Asset', needsBranch: false, needsDate: false, hint: 'Equipment and asset registry.' },
+  { key: 'attendance', label: 'Attendance', needsBranch: true, needsDate: true, hint: 'Staff clock-in / clock-out events per branch and date range.' },
+];
+
+function ReportsView({ dashboard }) {
+  const branches = Array.isArray(dashboard?.branchLocations) ? dashboard.branchLocations : [];
+  const today = new Date().toISOString().slice(0, 10);
+  const [reportType, setReportType] = useState('transactions');
+  const [branchId, setBranchId] = useState('');
+  const [startDate, setStartDate] = useState(today);
+  const [endDate, setEndDate] = useState(today);
+  const [rows, setRows] = useState([]);
+  const [columns, setColumns] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+
+  const activeType = REPORT_TYPES.find((type) => type.key === reportType) || REPORT_TYPES[0];
+  const selectedBranch = branches.find((branch) => String(getBranchStoreId(branch) ?? '') === String(branchId)) || null;
+
+  const branchLabel = (id) => {
+    const branch = branches.find((item) => String(getBranchStoreId(item) ?? '') === String(id));
+    return branch ? (branch.code || branch.name) : `Branch ${id}`;
+  };
+
+  const generateReport = async () => {
+    setLoading(true);
+    setError('');
+    setMessage('');
+
+    try {
+      let nextRows = [];
+      let nextColumns = [];
+
+      if (reportType === 'transactions') {
+        const transactions = await fetchTransactionHistory({ startDate, endDate, storeId: branchId || null, pageSize: 200 });
+        nextColumns = [
+          { key: 'ticketNo', label: 'Ticket No' },
+          { key: 'date', label: 'Date' },
+          { key: 'plate', label: 'Plate No' },
+          { key: 'operator', label: 'Operator' },
+          { key: 'total', label: 'Total' },
+          { key: 'status', label: 'Status' },
+        ];
+        nextRows = transactions.map((trx) => ({
+          ticketNo: trx.tiketno,
+          date: trx.datetransact ? String(trx.datetransact).slice(0, 19).replace('T', ' ') : '',
+          plate: trx.nopolisi || '',
+          operator: trx.operator || '',
+          total: Number(trx.total || 0),
+          status: trx.status || '',
+        }));
+      } else if (reportType === 'accounting') {
+        const { journals } = await loadAccountingSystem();
+        nextColumns = [
+          { key: 'journalNo', label: 'Journal No' },
+          { key: 'date', label: 'Date' },
+          { key: 'description', label: 'Description' },
+          { key: 'branch', label: 'Branch' },
+          { key: 'debit', label: 'Debit' },
+          { key: 'credit', label: 'Credit' },
+          { key: 'status', label: 'Status' },
+        ];
+        nextRows = journals
+          .filter((journal) => (!startDate || journal.journalDate >= startDate) && (!endDate || journal.journalDate <= endDate))
+          .filter((journal) => !branchId || String(journal.branchId ?? '') === String(branchId))
+          .map((journal) => ({
+            journalNo: journal.journalNo,
+            date: journal.journalDate,
+            description: journal.description,
+            branch: journal.branchId ? branchLabel(journal.branchId) : 'All branches',
+            debit: Number(journal.totalDebit || 0),
+            credit: Number(journal.totalCredit || 0),
+            status: journal.status,
+          }));
+      } else if (reportType === 'stock') {
+        const transfers = await loadStockTransfers({ branchId: branchId || undefined });
+        nextColumns = [
+          { key: 'transferNo', label: 'Transfer No' },
+          { key: 'date', label: 'Date' },
+          { key: 'item', label: 'Item' },
+          { key: 'from', label: 'From Branch' },
+          { key: 'to', label: 'To Branch' },
+          { key: 'quantity', label: 'Quantity' },
+        ];
+        nextRows = transfers
+          .filter((transfer) => (!startDate || transfer.transferDate >= startDate) && (!endDate || transfer.transferDate <= endDate))
+          .map((transfer) => ({
+            transferNo: transfer.transferNo,
+            date: transfer.transferDate,
+            item: `${transfer.item?.itemCode || ''} - ${transfer.item?.itemName || ''}`,
+            from: branchLabel(transfer.fromBranchId),
+            to: branchLabel(transfer.toBranchId),
+            quantity: transfer.quantity,
+          }));
+      } else if (reportType === 'inventory') {
+        const result = await loadInventoryCatalog({ limit: 500 });
+        nextColumns = [
+          { key: 'itemCode', label: 'Item Code' },
+          { key: 'itemName', label: 'Item Name' },
+          { key: 'category', label: 'Category' },
+          { key: 'branch', label: 'Branch' },
+          { key: 'quantity', label: 'Quantity' },
+          { key: 'unit', label: 'Unit' },
+          { key: 'status', label: 'Status' },
+          { key: 'value', label: 'Value' },
+        ];
+        nextRows = (result.items || [])
+          .filter((item) => !branchId || String(item.branchId ?? '') === String(branchId))
+          .map((item) => ({
+            itemCode: item.itemCode || '',
+            itemName: item.itemName,
+            category: item.category,
+            branch: item.branchId ? branchLabel(item.branchId) : 'Unassigned',
+            quantity: Number(item.quantity || 0),
+            unit: item.unit,
+            status: item.status,
+            value: Number(item.quantity || 0) * Number(item.unitCost || 0),
+          }));
+      } else if (reportType === 'asset') {
+        const assets = await loadMaintenanceAssets();
+        nextColumns = [
+          { key: 'name', label: 'Asset Name' },
+          { key: 'type', label: 'Type' },
+          { key: 'brandModel', label: 'Brand / Model' },
+          { key: 'serialNumber', label: 'Serial No' },
+          { key: 'location', label: 'Location' },
+          { key: 'status', label: 'Status' },
+          { key: 'purchaseDate', label: 'Purchase Date' },
+          { key: 'purchasePrice', label: 'Purchase Price' },
+        ];
+        nextRows = assets.map((asset) => ({
+          name: asset.name,
+          type: asset.assetType,
+          brandModel: [asset.brand, asset.model].filter(Boolean).join(' / '),
+          serialNumber: asset.serialNumber || '',
+          location: asset.location || '',
+          status: asset.status,
+          purchaseDate: asset.purchaseDate || '',
+          purchasePrice: Number(asset.purchasePrice || 0),
+        }));
+      } else if (reportType === 'attendance') {
+        if (!selectedBranch) {
+          throw new Error('Select a branch to generate the attendance report');
+        }
+
+        const records = await loadAttendanceReport({ branch: selectedBranch, startDate, endDate });
+        nextColumns = [
+          { key: 'staffName', label: 'Staff Name' },
+          { key: 'date', label: 'Date' },
+          { key: 'time', label: 'Time' },
+          { key: 'eventType', label: 'Event' },
+          { key: 'location', label: 'Location' },
+        ];
+        nextRows = records
+          .slice()
+          .sort((a, b) => new Date(a.datetime) - new Date(b.datetime))
+          .map((record) => ({
+            staffName: `${record?.user?.first_name || ''} ${record?.user?.last_name || ''}`.trim() || `User ${record?.user?.id || 'Unknown'}`,
+            date: record?.datetime ? String(record.datetime).slice(0, 10) : '',
+            time: record?.datetime ? String(record.datetime).slice(11, 16) : '',
+            eventType: Number(record?.status) === 1 ? 'Clock In' : Number(record?.status) === 0 ? 'Clock Out' : Number(record?.status) === 2 ? 'Break' : 'Other',
+            location: record?.location?.title || '',
+          }));
+      }
+
+      setRows(nextRows);
+      setColumns(nextColumns);
+      setMessage(`${nextRows.length} row${nextRows.length === 1 ? '' : 's'} generated.`);
+    } catch (err) {
+      setRows([]);
+      setColumns([]);
+      setError(err instanceof Error ? err.message : 'Failed to generate report');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const exportFileBaseName = () => `${activeType.key}-report-${startDate}-to-${endDate}`;
+
+  const handleExportExcel = () => {
+    if (!rows.length) return;
+    exportRowsToExcel(rows, columns, exportFileBaseName());
+  };
+
+  const handleExportPdf = () => {
+    if (!rows.length) return;
+    exportRowsToPdf(rows, columns, exportFileBaseName(), `${activeType.label} Report`);
+  };
+
+  return (
+    <div className="route-grid route-grid-accounting">
+      <section className="panel finance-hero-panel">
+        <div className="panel-head">
+          <div>
+            <div className="panel-title finance-panel-title">REPORTS</div>
+            <div className="panel-subtitle mono">GENERATE • PREVIEW • EXPORT TO EXCEL / PDF</div>
+          </div>
+        </div>
+
+        <div className="report-tabs">
+          {REPORT_TYPES.map((type) => (
+            <button
+              key={type.key}
+              type="button"
+              className={`report-tab${type.key === reportType ? ' report-tab-active' : ''}`}
+              onClick={() => {
+                setReportType(type.key);
+                setRows([]);
+                setColumns([]);
+                setMessage('');
+                setError('');
+              }}
+            >
+              {type.label}
+            </button>
+          ))}
+        </div>
+        <div className="finance-empty mono">{activeType.hint}</div>
+
+        {error ? <div className="finance-empty mono">{error}</div> : null}
+        {message ? <div className="finance-empty mono">{message}</div> : null}
+      </section>
+
+      <section className="panel accounting-form-panel">
+        <div className="panel-title">REPORT FILTERS</div>
+        <div className="accounting-form">
+          {activeType.needsBranch ? (
+            <select value={branchId} onChange={(event) => setBranchId(event.target.value)}>
+              <option value="">All branches</option>
+              {branches.map((branch, index) => (
+                <option key={getBranchStoreId(branch) ?? index} value={getBranchStoreId(branch) ?? ''}>
+                  {branch.name || branch.code || `Branch ${index + 1}`}
+                </option>
+              ))}
+            </select>
+          ) : null}
+          {activeType.needsDate ? (
+            <>
+              <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
+              <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
+            </>
+          ) : null}
+          <button type="button" className="opname-button" onClick={generateReport} disabled={loading}>
+            {loading ? 'Generating' : 'Generate Report'}
+          </button>
+          <button type="button" className="opname-button" onClick={handleExportExcel} disabled={!rows.length}>Export Excel</button>
+          <button type="button" className="opname-button" onClick={handleExportPdf} disabled={!rows.length}>Export PDF</button>
+        </div>
+      </section>
+
+      <section className="panel accounting-wide-panel">
+        <div className="panel-head">
+          <div className="panel-title">{activeType.label.toUpperCase()} REPORT PREVIEW</div>
+          <div className="panel-meta">{rows.length} ROWS</div>
+        </div>
+        <div className="report-table-wrap">
+          <table className="report-table">
+            <thead>
+              <tr>
+                {columns.map((column) => <th key={column.key}>{column.label}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => (
+                <tr key={index}>
+                  {columns.map((column) => <td key={column.key}>{row[column.key]}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function AccountingView({ dashboard }) {
   const branches = Array.isArray(dashboard?.branchLocations) ? dashboard.branchLocations : [];
   const today = new Date().toISOString().slice(0, 10);
@@ -5590,6 +5876,7 @@ function DashboardContent({ session, onLogout }) {
           <Route path="/branch-stock" element={<BranchStockView dashboard={dashboard} />} />
           <Route path="/finance" element={<FinanceView dashboard={dashboard} />} />
           <Route path="/accounting" element={<AccountingView dashboard={dashboard} />} />
+          <Route path="/reports" element={<ReportsView dashboard={dashboard} />} />
           <Route
             path="/attendance"
             element={
