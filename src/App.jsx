@@ -5281,6 +5281,8 @@ function HRISView() {
   const [payrollMonth, setPayrollMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [payroll, setPayroll] = useState({ loading: false, error: '', rows: [], generatedFor: '', source: '', computedAt: null });
   const [staffBranchFilter, setStaffBranchFilter] = useState('');
+  const [staffSearch, setStaffSearch] = useState('');
+  const [staffPage, setStaffPage] = useState(1);
 
   const reload = async () => {
     const [staff, scales, assignments] = await Promise.all([loadClocksterStaff(), loadSalaryScales(), loadSalaryAssignments()]);
@@ -5340,9 +5342,29 @@ function HRISView() {
   }, [state.staff]);
 
   const filteredStaff = useMemo(() => {
-    if (!staffBranchFilter) return state.staff;
-    return state.staff.filter((person) => String(person.location?.id ?? '') === staffBranchFilter);
-  }, [state.staff, staffBranchFilter]);
+    const query = staffSearch.trim().toLowerCase();
+    return state.staff.filter((person) => {
+      if (staffBranchFilter && String(person.location?.id ?? '') !== staffBranchFilter) return false;
+      if (!query) return true;
+      return [person.code, person.first_name, person.last_name, person.department?.title, person.position?.title]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+        .includes(query);
+    });
+  }, [state.staff, staffBranchFilter, staffSearch]);
+
+  useEffect(() => {
+    setStaffPage(1);
+  }, [staffBranchFilter, staffSearch]);
+
+  const STAFF_PAGE_SIZE = 20;
+  const staffTotalPages = Math.max(1, Math.ceil(filteredStaff.length / STAFF_PAGE_SIZE));
+  const staffPageClamped = Math.min(staffPage, staffTotalPages);
+  const pagedStaff = useMemo(
+    () => filteredStaff.slice((staffPageClamped - 1) * STAFF_PAGE_SIZE, staffPageClamped * STAFF_PAGE_SIZE),
+    [filteredStaff, staffPageClamped]
+  );
 
   const filteredPayrollRows = useMemo(() => {
     if (!staffBranchFilter) return payroll.rows;
@@ -5536,12 +5558,24 @@ function HRISView() {
           <div className="panel-title">ALL STAFF</div>
           <div className="panel-meta">{filteredStaff.length} / {state.staff.length} STAFF</div>
         </div>
-        <select className="opname-select" value={staffBranchFilter} onChange={(event) => setStaffBranchFilter(event.target.value)}>
-          <option value="">All branches</option>
-          {branchOptions.map(([id, title]) => (
-            <option key={id || 'unassigned'} value={id}>{title}</option>
-          ))}
-        </select>
+        <div className="management-filter-row">
+          <label className="management-filter">
+            <span className="mono">SEARCH STAFF</span>
+            <input
+              type="search"
+              className="management-search-input"
+              value={staffSearch}
+              onChange={(event) => setStaffSearch(event.target.value)}
+              placeholder="Search by name, code, department..."
+            />
+          </label>
+          <select className="opname-select" value={staffBranchFilter} onChange={(event) => setStaffBranchFilter(event.target.value)}>
+            <option value="">All branches</option>
+            {branchOptions.map(([id, title]) => (
+              <option key={id || 'unassigned'} value={id}>{title}</option>
+            ))}
+          </select>
+        </div>
         <div className="report-table-wrap">
           <table className="report-table">
             <thead>
@@ -5560,7 +5594,10 @@ function HRISView() {
               </tr>
             </thead>
             <tbody>
-              {filteredStaff.map((person) => {
+              {!pagedStaff.length ? (
+                <tr><td colSpan={11} className="finance-empty mono">No staff match this search/filter.</td></tr>
+              ) : null}
+              {pagedStaff.map((person) => {
                 const assignment = assignmentByStaffId.get(person.id);
                 const salary = assignment?.salary;
                 return (
@@ -5591,6 +5628,19 @@ function HRISView() {
             </tbody>
           </table>
         </div>
+        {filteredStaff.length ? (
+          <div className="members-table-foot">
+            <div className="members-table-foot-copy mono">
+              SHOWING {(staffPageClamped - 1) * STAFF_PAGE_SIZE + 1}-{Math.min(staffPageClamped * STAFF_PAGE_SIZE, filteredStaff.length)} OF {filteredStaff.length}
+            </div>
+            <div className="members-pagination mono">
+              <button type="button" disabled={staffPageClamped <= 1} onClick={() => setStaffPage((page) => Math.max(1, page - 1))} aria-label="Previous page">‹</button>
+              <span className="members-pagination-active">{staffPageClamped}</span>
+              <span>/ {staffTotalPages}</span>
+              <button type="button" disabled={staffPageClamped >= staffTotalPages} onClick={() => setStaffPage((page) => Math.min(staffTotalPages, page + 1))} aria-label="Next page">›</button>
+            </div>
+          </div>
+        ) : null}
       </section>
 
       <section className="panel accounting-wide-panel">
