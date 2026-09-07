@@ -491,6 +491,25 @@ export const assignStaffSalary = async (staffId, salaryScaleId) => {
   return result.data;
 };
 
+export const loadPayrollForMonth = async (month) => {
+  const result = await requestJson(`/hr/payroll?month=${encodeURIComponent(month)}`);
+  return Array.isArray(result?.data) ? result.data : [];
+};
+
+export const loadPayrollMonths = async () => {
+  const result = await requestJson('/hr/payroll/months');
+  return Array.isArray(result?.data) ? result.data : [];
+};
+
+export const savePayrollRun = async (month, rows) => {
+  const result = await requestJson('/hr/payroll', {
+    method: 'POST',
+    body: { month, rows },
+  });
+
+  return result.data;
+};
+
 export const loadOutletAssets = async ({ outlet } = {}) => {
   const params = new URLSearchParams();
   if (outlet) params.set('outlet', outlet);

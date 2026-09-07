@@ -43,6 +43,8 @@ import {
   loadSalaryAssignments,
   loadClocksterStaff,
   assignStaffSalary,
+  loadPayrollForMonth,
+  savePayrollRun,
   loadOutletAssets,
   loadOutletAssetOutlets,
   loadPaymentSettings,
@@ -5277,7 +5279,8 @@ function HRISView() {
   const [savingScale, setSavingScale] = useState(false);
   const [savingStaffId, setSavingStaffId] = useState(null);
   const [payrollMonth, setPayrollMonth] = useState(() => new Date().toISOString().slice(0, 7));
-  const [payroll, setPayroll] = useState({ loading: false, error: '', rows: [], generatedFor: '' });
+  const [payroll, setPayroll] = useState({ loading: false, error: '', rows: [], generatedFor: '', source: '', computedAt: null });
+  const [staffBranchFilter, setStaffBranchFilter] = useState('');
 
   const reload = async () => {
     const [staff, scales, assignments] = await Promise.all([loadClocksterStaff(), loadSalaryScales(), loadSalaryAssignments()]);
@@ -5287,6 +5290,30 @@ function HRISView() {
   useEffect(() => {
     reload().catch((error) => setState((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : 'Failed to load HRIS' })));
   }, []);
+
+  // Load any previously calculated (and saved) payroll for the selected month
+  // so it can be previewed without recalculating it from Clockster attendance.
+  useEffect(() => {
+    let cancelled = false;
+    setPayroll((current) => ({ ...current, loading: true, error: '' }));
+    loadPayrollForMonth(payrollMonth)
+      .then((rows) => {
+        if (cancelled) return;
+        setPayroll({
+          loading: false,
+          error: '',
+          rows,
+          generatedFor: payrollMonth,
+          source: rows.length ? 'saved' : '',
+          computedAt: rows[0]?.computedAt || null,
+        });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setPayroll((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : 'Failed to load saved payroll' }));
+      });
+    return () => { cancelled = true; };
+  }, [payrollMonth]);
 
   const assignmentByStaffId = useMemo(
     () => new Map(state.assignments.map((assignment) => [assignment.staffId, assignment])),
@@ -5301,6 +5328,26 @@ function HRISView() {
     });
     return [...counts.entries()].sort((a, b) => b[1] - a[1]);
   }, [state.staff]);
+
+  const branchOptions = useMemo(() => {
+    const byId = new Map();
+    state.staff.forEach((person) => {
+      const id = person.location?.id != null ? String(person.location.id) : '';
+      const title = person.location?.title || 'Unassigned';
+      if (!byId.has(id)) byId.set(id, title);
+    });
+    return [...byId.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [state.staff]);
+
+  const filteredStaff = useMemo(() => {
+    if (!staffBranchFilter) return state.staff;
+    return state.staff.filter((person) => String(person.location?.id ?? '') === staffBranchFilter);
+  }, [state.staff, staffBranchFilter]);
+
+  const filteredPayrollRows = useMemo(() => {
+    if (!staffBranchFilter) return payroll.rows;
+    return payroll.rows.filter((row) => String(row.branchId ?? '') === staffBranchFilter);
+  }, [payroll.rows, staffBranchFilter]);
 
   const unassignedCount = state.staff.filter((person) => !assignmentByStaffId.get(person.id)).length;
   const totalMonthlyPayroll = state.assignments.reduce((sum, assignment) => sum + Number(assignment.salary?.totalGaji || 0), 0);
@@ -5375,19 +5422,21 @@ function HRISView() {
         return {
           staffId: person.id,
           name: [person.first_name, person.last_name].filter(Boolean).join(' ') || `Staff ${person.id}`,
+          branchId: person.location?.id ?? null,
           branch: person.location?.title || 'Unassigned',
           positionName: assignment.positionName,
           ...result,
         };
       });
 
-      setPayroll({ loading: false, error: '', rows, generatedFor: payrollMonth });
+      const saved = await savePayrollRun(payrollMonth, rows);
+      setPayroll({ loading: false, error: '', rows, generatedFor: payrollMonth, source: 'calculated', computedAt: saved?.computedAt || new Date().toISOString() });
     } catch (error) {
       setPayroll((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : 'Failed to calculate payroll' }));
     }
   };
 
-  const totalPayrollForPeriod = payroll.rows.reduce((sum, row) => sum + row.totalGajiPeriod, 0);
+  const totalPayrollForPeriod = filteredPayrollRows.reduce((sum, row) => sum + row.totalGajiPeriod, 0);
 
   return (
     <div className="route-grid route-grid-accounting">
@@ -5485,8 +5534,14 @@ function HRISView() {
       <section className="panel accounting-wide-panel">
         <div className="panel-head">
           <div className="panel-title">ALL STAFF</div>
-          <div className="panel-meta">{state.staff.length} STAFF</div>
+          <div className="panel-meta">{filteredStaff.length} / {state.staff.length} STAFF</div>
         </div>
+        <select className="opname-select" value={staffBranchFilter} onChange={(event) => setStaffBranchFilter(event.target.value)}>
+          <option value="">All branches</option>
+          {branchOptions.map(([id, title]) => (
+            <option key={id || 'unassigned'} value={id}>{title}</option>
+          ))}
+        </select>
         <div className="report-table-wrap">
           <table className="report-table">
             <thead>
@@ -5505,7 +5560,7 @@ function HRISView() {
               </tr>
             </thead>
             <tbody>
-              {state.staff.map((person) => {
+              {filteredStaff.map((person) => {
                 const assignment = assignmentByStaffId.get(person.id);
                 const salary = assignment?.salary;
                 return (
@@ -5544,7 +5599,7 @@ function HRISView() {
             <div className="panel-title">HITUNG GAJI (PAYROLL)</div>
             <div className="panel-subtitle mono">GAJI POKOK PENUH SETIAP BULAN • KERAJINAN PER MINGGU (1-8, 9-15, 16-23, 24-AKHIR BULAN) DIBAYAR PENUH JIKA HADIR LENGKAP (CLOCK-IN &amp; CLOCK-OUT) DI SETIAP HARI KERJA TERJADWAL MINGGU TSB • HARI OFF/LEAVE DIKECUALIKAN</div>
           </div>
-          <div className="panel-meta">{payroll.rows.length ? `${formatRupiah(totalPayrollForPeriod)} TOTAL` : ''}</div>
+          <div className="panel-meta">{filteredPayrollRows.length ? `${formatRupiah(totalPayrollForPeriod)} TOTAL` : ''}</div>
         </div>
         <form
           className="accounting-form"
@@ -5558,17 +5613,31 @@ function HRISView() {
             value={payrollMonth}
             onChange={(event) => setPayrollMonth(event.target.value)}
           />
+          <select className="opname-select" value={staffBranchFilter} onChange={(event) => setStaffBranchFilter(event.target.value)}>
+            <option value="">All branches</option>
+            {branchOptions.map(([id, title]) => (
+              <option key={id || 'unassigned'} value={id}>{title}</option>
+            ))}
+          </select>
           <button type="submit" className="opname-button" disabled={payroll.loading}>
             {payroll.loading ? 'Menghitung...' : 'Hitung Gaji'}
           </button>
         </form>
 
         {payroll.error ? <div className="finance-empty mono">{payroll.error}</div> : null}
+        {!payroll.loading && !payroll.error && payroll.source === 'saved' ? (
+          <div className="finance-empty mono">
+            Menampilkan gaji tersimpan untuk {payrollMonth}{payroll.computedAt ? ` (dihitung ${new Date(payroll.computedAt).toLocaleString('id-ID')})` : ''}. Klik "Hitung Gaji" untuk menghitung ulang.
+          </div>
+        ) : null}
+        {!payroll.loading && !payroll.error && payroll.source === 'calculated' ? (
+          <div className="finance-empty mono">Gaji dihitung dan disimpan untuk {payrollMonth}.</div>
+        ) : null}
         {!payroll.loading && !payroll.error && payroll.generatedFor && !payroll.rows.length ? (
           <div className="finance-empty mono">No staff with an assigned salary position yet.</div>
         ) : null}
 
-        {payroll.rows.length ? (
+        {filteredPayrollRows.length ? (
           <div className="report-table-wrap">
             <table className="report-table">
               <thead>
@@ -5586,7 +5655,7 @@ function HRISView() {
                 </tr>
               </thead>
               <tbody>
-                {payroll.rows.map((row) => (
+                {filteredPayrollRows.map((row) => (
                   <tr key={row.staffId}>
                     <td><strong>{row.name}</strong></td>
                     <td>{row.branch}</td>
