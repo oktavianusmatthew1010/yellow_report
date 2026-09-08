@@ -56,6 +56,9 @@ import {
   loadDailyTargets,
   saveDailyTarget,
   loadExpenses,
+  loadExpenseCategories,
+  updateExpenseCategory,
+  loadChartOfAccounts,
 } from './api';
 import { exportRowsToExcel, exportRowsToPdf } from './reportExport';
 
@@ -4828,6 +4831,35 @@ function ExpensesView({ dashboard }) {
   const [endDate, setEndDate] = useState(today);
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [state, setState] = useState({ expenses: [], summary: null, loading: true, error: '' });
+  const [coaConfig, setCoaConfig] = useState({ categories: [], accounts: [], loading: true, error: '', savingId: null });
+
+  const reloadCoaConfig = async () => {
+    setCoaConfig((current) => ({ ...current, loading: true, error: '' }));
+    try {
+      const [categories, accounts] = await Promise.all([loadExpenseCategories(), loadChartOfAccounts()]);
+      setCoaConfig({ categories, accounts, loading: false, error: '', savingId: null });
+    } catch (error) {
+      setCoaConfig((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : 'Failed to load expense categories' }));
+    }
+  };
+
+  useEffect(() => {
+    reloadCoaConfig().catch(() => {});
+  }, []);
+
+  const handleAssignCoa = async (categoryId, coaAccountId) => {
+    setCoaConfig((current) => ({ ...current, savingId: categoryId, error: '' }));
+    try {
+      const updated = await updateExpenseCategory(categoryId, { coaAccountId: coaAccountId || null });
+      setCoaConfig((current) => ({
+        ...current,
+        savingId: null,
+        categories: current.categories.map((item) => (String(item.id) === String(categoryId) ? { ...item, coaAccountId: updated.coaAccountId } : item)),
+      }));
+    } catch (error) {
+      setCoaConfig((current) => ({ ...current, savingId: null, error: error instanceof Error ? error.message : 'Failed to update category' }));
+    }
+  };
 
   const reload = async () => {
     setState((current) => ({ ...current, loading: true, error: '' }));
@@ -4935,6 +4967,34 @@ function ExpensesView({ dashboard }) {
           ))}
           {!state.loading && !visibleExpenses.length ? <div className="finance-empty mono">NO EXPENSES FOUND FOR THIS FILTER.</div> : null}
         </div>
+      </section>
+
+      <section className="panel accounting-wide-panel">
+        <div className="panel-title">EXPENSE CATEGORY → CHART OF ACCOUNTS</div>
+        <div className="panel-subtitle mono">LINK EACH CATEGORY TO A GL ACCOUNT SO NEW EXPENSES AUTO-POST A JOURNAL ENTRY</div>
+        <div className="opname-table">
+          <div className="expense-category-head mono"><span>Category</span><span>COA Account</span><span>Status</span></div>
+          {coaConfig.categories.map((category) => (
+            <div key={category.id ?? category.name} className="expense-category-row">
+              <strong>{category.name}</strong>
+              <select
+                className="management-select"
+                value={category.coaAccountId ?? ''}
+                disabled={category.id == null || coaConfig.savingId === category.id}
+                onChange={(event) => handleAssignCoa(category.id, event.target.value)}
+              >
+                <option value="">Not linked</option>
+                {coaConfig.accounts.map((account) => (
+                  <option key={account.id} value={account.id}>{account.code} - {account.name}</option>
+                ))}
+              </select>
+              <span>{coaConfig.savingId === category.id ? 'Saving…' : (category.coaAccountId ? 'Linked' : 'Not linked')}</span>
+            </div>
+          ))}
+          {!coaConfig.loading && !coaConfig.categories.length ? <div className="finance-empty mono">NO EXPENSE CATEGORIES FOUND.</div> : null}
+        </div>
+        {coaConfig.loading ? <div className="finance-empty mono">LOADING CATEGORIES...</div> : null}
+        {coaConfig.error ? <div className="finance-empty mono">{coaConfig.error}</div> : null}
       </section>
     </div>
   );

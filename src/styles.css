@@ -1547,6 +1547,17 @@ select optgroup {
   font-size: 0.82rem;
 }
 
+.expense-category-head,
+.expense-category-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 220px 160px;
+  gap: 10px;
+  align-items: center;
+  min-width: 560px;
+  padding: 11px;
+  font-size: 0.82rem;
+}
+
 .expense-head,
 .expense-row {
   display: grid;
@@ -1566,7 +1577,8 @@ select optgroup {
 .transfer-head,
 .supplier-head,
 .po-head,
-.expense-head {
+.expense-head,
+.expense-category-head {
   background: rgba(4, 13, 26, 0.55);
   color: #dccda7;
   font-size: 0.66rem;
@@ -1581,7 +1593,8 @@ select optgroup {
 .transfer-row,
 .supplier-row,
 .po-row,
-.expense-row {
+.expense-row,
+.expense-category-row {
   border-top: 1px solid rgba(255, 209, 28, 0.1);
   color: var(--text-dim);
 }
@@ -1594,7 +1607,8 @@ select optgroup {
 .transfer-row strong,
 .supplier-row strong,
 .po-row strong,
-.expense-row strong {
+.expense-row strong,
+.expense-category-row strong {
   color: #f6f2dd;
   overflow-wrap: anywhere;
 }
@@ -1607,7 +1621,8 @@ select optgroup {
 .transfer-row span,
 .supplier-row span,
 .po-row span,
-.expense-row span {
+.expense-row span,
+.expense-category-row span {
   min-width: 0;
   overflow-wrap: anywhere;
 }

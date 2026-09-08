@@ -307,6 +307,11 @@ export const updateInventoryStockCount = async ({ itemId, systemQuantity, counte
   return result.data;
 };
 
+export const loadChartOfAccounts = async () => {
+  const result = await requestJson('/accounting/coa');
+  return Array.isArray(result?.data) ? result.data : [];
+};
+
 export const loadAccountingSystem = async () => {
   const [coaResult, journalsResult] = await Promise.all([
     requestJson('/accounting/coa'),
@@ -408,6 +413,21 @@ export const loadExpenses = async ({ startDate, endDate, category, storeId, page
     summary: result?.summary || null,
     pagination: result?.pagination || null,
   };
+};
+
+export const loadExpenseCategories = async () => {
+  const result = await requestJson('/expenses/categories', { auth: true });
+  return Array.isArray(result?.data) ? result.data : [];
+};
+
+export const updateExpenseCategory = async (categoryId, { coaAccountId } = {}) => {
+  const result = await requestJson(`/expenses/categories/${categoryId}`, {
+    method: 'PUT',
+    auth: true,
+    body: { coaAccountId },
+  });
+
+  return result.data;
 };
 
 export const loadSuppliers = async ({ search, isActive } = {}) => {
