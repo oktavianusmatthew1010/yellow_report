@@ -55,6 +55,7 @@ import {
   redeemLoyaltyVoucher,
   loadDailyTargets,
   saveDailyTarget,
+  loadExpenses,
 } from './api';
 import { exportRowsToExcel, exportRowsToPdf } from './reportExport';
 
@@ -80,6 +81,7 @@ const NAV_ITEMS = [
   { label: 'Branch Stock', icon: 'inventory', path: '/branch-stock' },
   { label: 'Purchasing', icon: 'inventory', path: '/purchasing' },
   { label: 'Finance', icon: 'ledger', path: '/finance' },
+  { label: 'Expenses', icon: 'ledger', path: '/expenses' },
   { label: 'Accounting', icon: 'ledger', path: '/accounting' },
   { label: 'Reports', icon: 'ledger', path: '/reports' },
   { label: 'Settings', icon: 'ledger', path: '/settings' },
@@ -4817,6 +4819,127 @@ function PurchasingView({ dashboard }) {
   );
 }
 
+function ExpensesView({ dashboard }) {
+  const branches = Array.isArray(dashboard?.branchLocations) ? dashboard.branchLocations : [];
+  const today = new Date().toISOString().slice(0, 10);
+  const monthStart = `${today.slice(0, 8)}01`;
+  const [branchFilter, setBranchFilter] = useState('all');
+  const [startDate, setStartDate] = useState(monthStart);
+  const [endDate, setEndDate] = useState(today);
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [state, setState] = useState({ expenses: [], summary: null, loading: true, error: '' });
+
+  const reload = async () => {
+    setState((current) => ({ ...current, loading: true, error: '' }));
+    try {
+      const { expenses, summary } = await loadExpenses({
+        startDate,
+        endDate,
+        storeId: branchFilter === 'all' ? undefined : branchFilter,
+        limit: 200,
+      });
+      setState({ expenses, summary, loading: false, error: '' });
+    } catch (error) {
+      setState({ expenses: [], summary: null, loading: false, error: error instanceof Error ? error.message : 'Failed to load expenses' });
+    }
+  };
+
+  useEffect(() => {
+    reload().catch(() => {});
+  }, [branchFilter, startDate, endDate]);
+
+  const categories = useMemo(() => {
+    const set = new Set(state.expenses.map((expense) => expense.category || 'Operational'));
+    return ['all', ...Array.from(set)];
+  }, [state.expenses]);
+
+  const visibleExpenses = categoryFilter === 'all'
+    ? state.expenses
+    : state.expenses.filter((expense) => (expense.category || 'Operational') === categoryFilter);
+
+  const totalAmount = visibleExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+
+  return (
+    <div className="route-grid route-grid-accounting">
+      <section className="panel finance-hero-panel">
+        <div className="panel-head">
+          <div>
+            <div className="panel-title finance-panel-title">EXPENSES</div>
+            <div className="panel-subtitle mono">ALL RECORDED EXPENSES</div>
+          </div>
+        </div>
+
+        <div className="finance-kpi-grid">
+          <article className="finance-kpi-card"><div className="finance-kpi-label mono">TOTAL EXPENSES</div><div className="finance-kpi-value">{formatRupiah(totalAmount)}</div><div className="finance-kpi-note">{startDate} to {endDate}</div></article>
+          <article className="finance-kpi-card"><div className="finance-kpi-label mono">RECORDS</div><div className="finance-kpi-value">{visibleExpenses.length}</div><div className="finance-kpi-note">Matching current filter</div></article>
+        </div>
+
+        <div className="management-filter-row">
+          <label className="management-filter">
+            <span className="mono">BRANCH</span>
+            <select className="management-select" value={branchFilter} onChange={(event) => setBranchFilter(event.target.value)}>
+              <option value="all">All Branches</option>
+              {branches.map((branch, index) => {
+                const branchId = getBranchStoreId(branch);
+                const branchLabel = branch.name || branch.code || branch.location || `Branch ${index + 1}`;
+                return (
+                  <option key={`${branchId ?? index}`} value={String(branchId ?? '')}>
+                    {branchLabel}
+                  </option>
+                );
+              })}
+            </select>
+          </label>
+
+          <label className="management-filter">
+            <span className="mono">FROM</span>
+            <input type="date" className="transaction-date-input" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
+          </label>
+
+          <label className="management-filter">
+            <span className="mono">TO</span>
+            <input type="date" className="transaction-date-input" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
+          </label>
+
+          <div className="management-chip-row">
+            {categories.map((category) => (
+              <button
+                key={category}
+                type="button"
+                className={`management-chip ${categoryFilter === category ? 'management-chip-active' : ''}`}
+                onClick={() => setCategoryFilter(category)}
+                aria-pressed={categoryFilter === category}
+              >
+                {category === 'all' ? 'ALL' : category.toUpperCase()}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {state.loading ? <div className="finance-empty mono">LOADING EXPENSES...</div> : null}
+        {state.error ? <div className="finance-empty mono">{state.error}</div> : null}
+      </section>
+
+      <section className="panel accounting-wide-panel">
+        <div className="panel-title">EXPENSE LIST</div>
+        <div className="opname-table">
+          <div className="expense-head mono"><span>Date</span><span>Title</span><span>Category</span><span>Created By</span><span>Amount</span></div>
+          {visibleExpenses.map((expense) => (
+            <div key={expense.id} className="expense-row">
+              <span>{expense.expenseDate}</span>
+              <strong>{expense.title}</strong>
+              <span>{expense.category || 'Operational'}</span>
+              <span>{expense.createdByName || '-'}</span>
+              <span>{formatRupiah(expense.amount)}</span>
+            </div>
+          ))}
+          {!state.loading && !visibleExpenses.length ? <div className="finance-empty mono">NO EXPENSES FOUND FOR THIS FILTER.</div> : null}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function LoyaltyVoucherView() {
   const [state, setState] = useState({ vouchers: [], services: [], loading: true, error: '', message: '' });
   const [form, setForm] = useState({
@@ -7188,6 +7311,7 @@ function DashboardContent({ session, onLogout }) {
           <Route path="/branch-stock" element={<BranchStockView dashboard={dashboard} />} />
           <Route path="/purchasing" element={<PurchasingView dashboard={dashboard} />} />
           <Route path="/finance" element={<FinanceView dashboard={dashboard} />} />
+          <Route path="/expenses" element={<ExpensesView dashboard={dashboard} />} />
           <Route path="/accounting" element={<AccountingView dashboard={dashboard} />} />
           <Route path="/reports" element={<ReportsView dashboard={dashboard} />} />
           <Route path="/settings" element={<SettingsView dashboard={dashboard} />} />

@@ -393,6 +393,23 @@ export const loadStockTransfers = async ({ branchId } = {}) => {
   return Array.isArray(result?.data) ? result.data : [];
 };
 
+export const loadExpenses = async ({ startDate, endDate, category, storeId, page, limit } = {}) => {
+  const params = new URLSearchParams();
+  if (startDate) params.set('startDate', startDate);
+  if (endDate) params.set('endDate', endDate);
+  if (category) params.set('category', category);
+  if (page) params.set('page', page);
+  if (limit) params.set('limit', limit);
+  const query = params.toString();
+  const result = await requestJson(appendStoreId(`/expenses${query ? `?${query}` : ''}`, storeId), { auth: true });
+
+  return {
+    expenses: Array.isArray(result?.data) ? result.data : [],
+    summary: result?.summary || null,
+    pagination: result?.pagination || null,
+  };
+};
+
 export const loadSuppliers = async ({ search, isActive } = {}) => {
   const params = new URLSearchParams();
   if (search) params.set('search', search);
