@@ -355,7 +355,7 @@ button {
 
 .nav-item.active {
   background: linear-gradient(90deg, rgba(255, 209, 28, 0.98), rgba(255, 209, 28, 0.94));
-  color: #171100;
+  color: #000;
   box-shadow: inset 0 0 0 1px rgba(255, 209, 28, 0.2);
 }
 
@@ -368,7 +368,7 @@ button {
 }
 
 .nav-item.active .nav-icon {
-  color: #1a1300;
+  color: #000;
 }
 
 .nav-icon {
@@ -1658,8 +1658,8 @@ button {
 
 .report-tab-active {
   border-color: rgba(255, 209, 28, 0.55);
-  background: rgba(255, 209, 28, 0.14);
-  color: var(--yellow);
+  background: var(--yellow);
+  color: #000;
 }
 
 .report-table-wrap {
@@ -2055,8 +2055,8 @@ button {
 
 .attendance-filter-chip-active {
   border-color: rgba(255, 209, 28, 0.72);
-  background: rgba(255, 209, 28, 0.16);
-  color: var(--yellow);
+  background: var(--yellow);
+  color: #000;
 }
 
 .attendance-card-photo-wrap {
@@ -2466,9 +2466,9 @@ button {
 }
 
 .management-chip-active {
-  background: rgba(255, 209, 28, 0.18);
+  background: var(--yellow);
   border-color: rgba(255, 209, 28, 0.64);
-  color: var(--yellow);
+  color: #000;
 }
 
 .management-chip-static {
@@ -3029,7 +3029,7 @@ button {
 
 .member-tier-tab-active {
   background: var(--yellow);
-  color: #1b1100;
+  color: #000;
   font-weight: 800;
 }
 
@@ -3280,7 +3280,7 @@ button {
 
 .members-pagination-active {
   background: var(--yellow) !important;
-  color: #1b1100 !important;
+  color: #000 !important;
   font-weight: 800;
 }
 
@@ -3581,7 +3581,15 @@ button {
 
 .compliment-list-card-active {
   border-color: rgba(255, 209, 28, 0.66);
-  background: rgba(255, 209, 28, 0.12);
+  background: var(--yellow);
+  color: #000;
+}
+
+.compliment-list-card-active .compliment-list-name,
+.compliment-list-card-active .compliment-list-meta,
+.compliment-list-card-active .compliment-list-barcode,
+.compliment-list-card-active .compliment-list-sub {
+  color: #000;
 }
 
 .compliment-list-card-head {
@@ -4096,7 +4104,7 @@ button {
 
 .timetable-tab-active {
   background: var(--yellow);
-  color: #161100;
+  color: #000;
 }
 
 .timetable-proxy-pill {
@@ -5620,7 +5628,15 @@ button {
 
 .summary-mobile-branch.selected {
   border-color: rgba(255, 209, 28, 0.34);
-  background: rgba(255, 209, 28, 0.08);
+  background: var(--yellow);
+  color: #000;
+}
+
+.summary-mobile-branch.selected .summary-mobile-branch-rank,
+.summary-mobile-branch.selected .summary-mobile-branch-copy strong,
+.summary-mobile-branch.selected .summary-mobile-branch-copy span,
+.summary-mobile-branch.selected .summary-mobile-branch-meta strong {
+  color: #000;
 }
 
 .summary-mobile-branch-rank {
@@ -5752,8 +5768,18 @@ button {
 
 .branch-card-selected {
   border-color: rgba(255, 209, 28, 0.68);
-  background: rgba(255, 209, 28, 0.12);
+  background: var(--yellow);
   box-shadow: 0 0 0 1px rgba(255, 209, 28, 0.14), 0 14px 30px rgba(0, 0, 0, 0.22);
+  color: #000;
+}
+
+.branch-card-selected .branch-card-code,
+.branch-card-selected .branch-card-name,
+.branch-card-selected .branch-card-index,
+.branch-card-selected .branch-card-location,
+.branch-card-selected .branch-card-phone,
+.branch-card-selected .branch-card-footer {
+  color: #000;
 }
 
 .branch-card-top {
@@ -6897,8 +6923,8 @@ button {
   }
 
   .mobile-bottom-nav-item.active {
-    color: var(--yellow);
-    background: rgba(255, 209, 28, 0.14);
+    color: #000;
+    background: var(--yellow);
     border-color: rgba(255, 209, 28, 0.28);
     box-shadow: inset 0 0 0 1px rgba(255, 209, 28, 0.08);
   }
