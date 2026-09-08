@@ -59,21 +59,13 @@ import {
   loadExpenseCategories,
   updateExpenseCategory,
   loadChartOfAccounts,
+  loginStaff,
 } from './api';
 import { exportRowsToExcel, exportRowsToPdf } from './reportExport';
 
 const DEFAULT_LOGIN = {
   identifier: 'admin@yellocarwash.com',
   password: 'password123',
-  token: 'local-admin-session',
-  staff: {
-    id: 'admin',
-    staffid: 1,
-    staffname: 'Admin',
-    name: 'Admin',
-    role: 'admin',
-    loginMode: 'local_hardcoded',
-  },
 };
 
 const NAV_ITEMS = [
@@ -970,18 +962,17 @@ function LoginView({ onLoginSuccess }) {
     setError('');
 
     try {
-      const isValidLogin =
-        String(identifier || '').trim().toLowerCase() === DEFAULT_LOGIN.identifier &&
-        String(password || '') === DEFAULT_LOGIN.password;
+      const result = await loginStaff({ identifier, password });
+      const nextToken = result?.token;
+      const nextStaff = result?.staff || null;
 
-      if (!isValidLogin) {
-        throw new Error('Invalid login. Use the default admin credentials.');
+      if (!nextToken) {
+        throw new Error('Login failed: no session token returned.');
       }
 
-      const nextStaff = DEFAULT_LOGIN.staff;
-      window.localStorage.setItem(AUTH_STORAGE_KEYS.token, DEFAULT_LOGIN.token);
+      window.localStorage.setItem(AUTH_STORAGE_KEYS.token, nextToken);
       window.localStorage.setItem(AUTH_STORAGE_KEYS.staff, JSON.stringify(nextStaff));
-      onLoginSuccess({ token: DEFAULT_LOGIN.token, staff: nextStaff });
+      onLoginSuccess({ token: nextToken, staff: nextStaff });
       navigate('/summary', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
@@ -1002,10 +993,10 @@ function LoginView({ onLoginSuccess }) {
         </div>
 
         <div className="login-copy">
-          <div className="login-kicker mono">LOCAL ADMIN SIGN-IN</div>
+          <div className="login-kicker mono">ADMIN SIGN-IN</div>
           <h1>Access the home dashboard with the default admin credentials.</h1>
           <p>
-            This login skips the auth request and uses the built-in admin account:
+            Signs in against the live backend and issues a real session token:
             <span className="mono"> admin@yellocarwash.com / password123</span>.
           </p>
         </div>
