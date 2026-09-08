@@ -41,6 +41,12 @@ button {
   font: inherit;
 }
 
+select option,
+select optgroup {
+  color: #000;
+  background: #fff;
+}
+
 .mono {
   font-family: 'Roboto Mono', 'SFMono-Regular', Consolas, monospace;
 }
