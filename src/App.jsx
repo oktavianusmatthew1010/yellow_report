@@ -6245,6 +6245,14 @@ function AccountingView({ dashboard }) {
   const totalDebit = journalForm.lines.reduce((sum, line) => sum + Number(line.debit || 0), 0);
   const totalCredit = journalForm.lines.reduce((sum, line) => sum + Number(line.credit || 0), 0);
 
+  const addJournalLine = () => {
+    setJournalForm((current) => ({ ...current, lines: [...current.lines, { accountCode: state.accounts[0]?.code || '', debit: '', credit: '' }] }));
+  };
+
+  const removeJournalLine = (index) => {
+    setJournalForm((current) => ({ ...current, lines: current.lines.filter((_, lineIndex) => lineIndex !== index) }));
+  };
+
   const submitAccount = async (event) => {
     event.preventDefault();
     try {
@@ -6314,8 +6322,10 @@ function AccountingView({ dashboard }) {
               </select>
               <input type="number" min="0" value={line.debit} onChange={(event) => setJournalForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, debit: event.target.value } : item) }))} placeholder="Debit" />
               <input type="number" min="0" value={line.credit} onChange={(event) => setJournalForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, credit: event.target.value } : item) }))} placeholder="Credit" />
+              <button type="button" className="po-line-remove" onClick={() => removeJournalLine(index)} disabled={journalForm.lines.length <= 2}>✕</button>
             </div>
           ))}
+          <button type="button" className="opname-button" onClick={addJournalLine}>+ Add Line</button>
           <div className="finance-net-row"><span>Balance</span><strong>{formatRupiah(totalDebit)} / {formatRupiah(totalCredit)}</strong></div>
           <button type="submit" className="opname-button" disabled={Math.round(totalDebit * 100) !== Math.round(totalCredit * 100)}>Post Journal</button>
         </form>
@@ -7456,6 +7466,12 @@ function AppRouter() {
 
     setSession({ token: '', staff: null });
   };
+
+  useEffect(() => {
+    const handleUnauthorized = () => handleLogout();
+    window.addEventListener('auth:unauthorized', handleUnauthorized);
+    return () => window.removeEventListener('auth:unauthorized', handleUnauthorized);
+  }, []);
 
   return (
     <Routes>

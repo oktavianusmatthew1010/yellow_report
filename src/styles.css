@@ -1751,8 +1751,9 @@ select optgroup {
 
 .journal-line {
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) 96px 96px;
+  grid-template-columns: minmax(150px, 1fr) 96px 96px 36px;
   gap: 8px;
+  align-items: center;
 }
 
 .finance-statement-row {

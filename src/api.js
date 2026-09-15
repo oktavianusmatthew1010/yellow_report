@@ -78,7 +78,11 @@ const requestJson = async (path, { auth = false, method = 'GET', body, headers: 
   });
 
   if (!response.ok) {
-    throw new Error(await readErrorMessage(response));
+    const message = await readErrorMessage(response);
+    if (auth && response.status === 401 && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('auth:unauthorized', { detail: { message } }));
+    }
+    throw new Error(message);
   }
 
   return response.json();
