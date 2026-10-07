@@ -5636,6 +5636,37 @@ function HRISView() {
 
   const totalPayrollForPeriod = filteredPayrollRows.reduce((sum, row) => sum + row.totalGajiPeriod, 0);
 
+  const handleExportPayroll = () => {
+    if (!filteredPayrollRows.length) return;
+    const sumOf = (key) => filteredPayrollRows.reduce((sum, row) => sum + Number(row[key] || 0), 0);
+    const columns = [
+      { key: 'name', label: 'Name' },
+      { key: 'branch', label: 'Branch' },
+      { key: 'positionName', label: 'Position' },
+      { key: 'daysPresent', label: 'Days Present' },
+      { key: 'kerajinanWeeks', label: 'Kerajinan Weeks' },
+      { key: 'gajiPokok', label: 'Gaji Pokok' },
+      { key: 'uangMakan', label: 'Uang Makan' },
+      { key: 'transport', label: 'Transport' },
+      { key: 'kerajinanEarned', label: 'Uang Kerajinan' },
+      { key: 'totalGajiPeriod', label: 'Total Gaji' },
+    ];
+    const rows = [
+      ...filteredPayrollRows.map((row) => ({ ...row, kerajinanWeeks: `${row.weeksEarned}/${row.weeksEvaluated}` })),
+      {
+        name: 'TOTAL',
+        gajiPokok: sumOf('gajiPokok'),
+        uangMakan: sumOf('uangMakan'),
+        transport: sumOf('transport'),
+        kerajinanEarned: sumOf('kerajinanEarned'),
+        totalGajiPeriod: sumOf('totalGajiPeriod'),
+      },
+    ];
+    const branchTitle = staffBranchFilter ? branchOptions.find(([id]) => id === staffBranchFilter)?.[1] : '';
+    const branchSuffix = branchTitle ? `-${branchTitle.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '')}` : '';
+    exportRowsToExcel(rows, columns, `Payroll-${payroll.generatedFor || payrollMonth}${branchSuffix}`, 'Payroll');
+  };
+
   return (
     <div className="route-grid route-grid-accounting">
       <section className="panel finance-hero-panel">
@@ -5847,6 +5878,9 @@ function HRISView() {
           </select>
           <button type="submit" className="opname-button" disabled={payroll.loading}>
             {payroll.loading ? 'Menghitung...' : 'Hitung Gaji'}
+          </button>
+          <button type="button" className="opname-button" onClick={handleExportPayroll} disabled={payroll.loading || !filteredPayrollRows.length}>
+            Export Excel
           </button>
         </form>
 

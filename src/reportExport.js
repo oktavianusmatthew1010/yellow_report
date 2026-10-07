@@ -2,7 +2,7 @@ import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-export const exportRowsToExcel = (rows, columns, filename) => {
+export const exportRowsToExcel = (rows, columns, filename, sheetName = 'Report') => {
   const data = rows.map((row) => {
     const flat = {};
     columns.forEach((column) => {
@@ -13,7 +13,7 @@ export const exportRowsToExcel = (rows, columns, filename) => {
 
   const sheet = XLSX.utils.json_to_sheet(data);
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, sheet, 'Report');
+  XLSX.utils.book_append_sheet(workbook, sheet, sheetName);
   XLSX.writeFile(workbook, `${filename}.xlsx`);
 };
 
