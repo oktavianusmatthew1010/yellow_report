@@ -3721,7 +3721,7 @@ function AttendanceView({
             </div>
 
             {visibleRows.length ? (
-              visibleRows.slice(0, 12).map((row) => (
+              visibleRows.map((row) => (
                 <article key={row.key} className={`attendance-table-row attendance-table-row-${row.statusTone}`}>
                   <div className="attendance-table-staff">
                     {row.user?.photo ? (
@@ -5387,14 +5387,19 @@ const getPayrollWeeks = (monthStr) => {
   const monthIndex = Number(monthNumStr) - 1;
   if (!Number.isFinite(year) || !Number.isFinite(monthIndex)) return [];
 
-  const lastDay = new Date(year, monthIndex + 1, 0).getDate();
-  return [[1, 8], [9, 15], [16, 23], [24, lastDay]]
-    .filter(([start]) => start <= lastDay)
-    .map(([start, end], index) => ({
-      label: `Minggu ${index + 1}`,
-      start: new Date(year, monthIndex, start),
-      end: new Date(year, monthIndex, Math.min(end, lastDay)),
-    }));
+  // Kerajinan periods are fixed calendar dates, not Mon-Sun weeks. Days 29-31 fall outside every
+  // period, so a month pays at most 4x kerajinan.
+  return [[1, 8], [9, 15], [16, 22], [23, 28]].map(([start, end], index) => ({
+    label: `Minggu ${index + 1}`,
+    start: new Date(year, monthIndex, start),
+    end: new Date(year, monthIndex, end),
+  }));
+};
+
+const getPayrollMonthRange = (monthStr) => {
+  const [year, monthNum] = String(monthStr || '').split('-').map(Number);
+  if (!Number.isFinite(year) || !Number.isFinite(monthNum)) return null;
+  return { start: new Date(year, monthNum - 1, 1), end: new Date(year, monthNum, 0) };
 };
 
 const buildDailyAttendanceMap = (scheduleEntries = []) => {
@@ -5416,10 +5421,17 @@ const buildDailyAttendanceMap = (scheduleEntries = []) => {
   return byUserDate;
 };
 
-const computeStaffPayrollForMonth = (staffId, salary, attendanceMap, weeks, today) => {
+const computeStaffPayrollForMonth = (staffId, salary, attendanceMap, weeks, monthRange, today) => {
   let daysPresent = 0;
   let weeksEarned = 0;
   let weeksEvaluated = 0;
+
+  // Days present covers the whole month, including days 29-31 that sit outside the kerajinan periods.
+  for (let day = new Date(monthRange.start); day <= monthRange.end; day.setDate(day.getDate() + 1)) {
+    if (day > today) continue;
+    const record = attendanceMap.get(`${staffId}|${toYmd(day)}`);
+    if (record?.isWorkDay && record.isComplete) daysPresent += 1;
+  }
 
   weeks.forEach((week) => {
     let requiredDays = 0;
@@ -5430,10 +5442,7 @@ const computeStaffPayrollForMonth = (staffId, salary, attendanceMap, weeks, toda
       const record = attendanceMap.get(`${staffId}|${toYmd(day)}`);
       if (!record?.isWorkDay) continue;
       requiredDays += 1;
-      if (record.isComplete) {
-        completeDays += 1;
-        daysPresent += 1;
-      }
+      if (record.isComplete) completeDays += 1;
     }
 
     if (requiredDays > 0) {
@@ -5665,10 +5674,11 @@ function HRISView() {
     setPayroll((current) => ({ ...current, loading: true, error: '' }));
     try {
       const weeks = getPayrollWeeks(payrollMonth);
-      if (!weeks.length) throw new Error('Select a valid month');
+      const monthRange = getPayrollMonthRange(payrollMonth);
+      if (!weeks.length || !monthRange) throw new Error('Select a valid month');
 
-      const monthStart = weeks[0].start;
-      const monthEnd = weeks[weeks.length - 1].end;
+      const monthStart = monthRange.start;
+      const monthEnd = monthRange.end;
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
@@ -5690,7 +5700,7 @@ function HRISView() {
 
       const rows = assignedStaff.map((person) => {
         const assignment = assignmentByStaffId.get(person.id);
-        const result = computeStaffPayrollForMonth(person.id, assignment.salary, attendanceMap, weeks, today);
+        const result = computeStaffPayrollForMonth(person.id, assignment.salary, attendanceMap, weeks, monthRange, today);
         return {
           staffId: person.id,
           name: [person.first_name, person.last_name].filter(Boolean).join(' ') || `Staff ${person.id}`,
@@ -5805,7 +5815,7 @@ function HRISView() {
           <div className="panel-title">SALARY SCALE (IMPORTED FROM LIST GAJI DAN TARGET.XLSX)</div>
           <div className="panel-meta">{state.scales.length} POSITIONS</div>
         </div>
-        <div className="finance-empty mono">Uang kerajinan dihitung mingguan: minggu 1 (tgl 1-8), minggu 2 (9-15), minggu 3 (16-23), minggu 4 (24-30/31). Total gaji = gaji pokok + uang makan + transport + (kerajinan x 4 minggu).</div>
+        <div className="finance-empty mono">Uang kerajinan dihitung mingguan: minggu 1 (tgl 1-8), minggu 2 (9-15), minggu 3 (16-22), minggu 4 (23-28). Total gaji = gaji pokok + uang makan + transport + (kerajinan x 4 minggu).</div>
         <div className="report-table-wrap">
           <table className="report-table">
             <thead>
@@ -5969,7 +5979,7 @@ function HRISView() {
         <div className="panel-head">
           <div>
             <div className="panel-title">HITUNG GAJI (PAYROLL)</div>
-            <div className="panel-subtitle mono">GAJI POKOK PENUH SETIAP BULAN • KERAJINAN PER MINGGU (1-8, 9-15, 16-23, 24-AKHIR BULAN) DIBAYAR PENUH JIKA HADIR LENGKAP (CLOCK-IN &amp; CLOCK-OUT) DI SETIAP HARI KERJA TERJADWAL MINGGU TSB • HARI OFF/LEAVE DIKECUALIKAN</div>
+            <div className="panel-subtitle mono">GAJI POKOK PENUH SETIAP BULAN • KERAJINAN PER MINGGU (1-8, 9-15, 16-22, 23-28) DIBAYAR PENUH JIKA HADIR LENGKAP (CLOCK-IN &amp; CLOCK-OUT) DI SETIAP HARI KERJA TERJADWAL MINGGU TSB • HARI OFF/LEAVE DIKECUALIKAN</div>
           </div>
           <div className="panel-meta">{filteredPayrollRows.length ? `${formatRupiah(totalPayrollForPeriod)} TOTAL` : ''}</div>
         </div>

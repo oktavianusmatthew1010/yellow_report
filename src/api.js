@@ -1260,38 +1260,52 @@ const loadExecutiveDashboardOnce = async ({
     : branchLocations.find((branch) => String(getBranchStoreId(branch)) === String(storeId)) || null;
   const scopeLabel = selectedBranch?.name || (storeId === null || typeof storeId === 'undefined' ? 'COMPANY PREVIEW' : `BRANCH #${storeId}`);
 
-  const resolvedAttendanceLocationId = String(
-    attendanceLocationId
-      || selectedBranch?.clocksterId
-      || selectedBranch?.raw?.clockster_id
-      || selectedBranch?.raw?.clocksterId
-      || selectedBranch?.raw?.clockster_location_id
-      || selectedBranch?.raw?.clocksterLocationId
-      || selectedBranch?.raw?.location_id
-      || selectedBranch?.raw?.locationid
-      || '17526'
+  const getBranchClocksterId = (branch) => (
+    branch?.clocksterId
+      || branch?.raw?.clockster_id
+      || branch?.raw?.clocksterId
+      || branch?.raw?.clockster_location_id
+      || branch?.raw?.clocksterLocationId
+      || branch?.raw?.location_id
+      || branch?.raw?.locationid
+      || null
   );
+  // A selected branch narrows attendance to its Clockster location; Company Preview covers every branch.
+  const attendanceLocationIds = attendanceLocationId || selectedBranch
+    ? [String(attendanceLocationId || getBranchClocksterId(selectedBranch) || '17526')]
+    : [...new Set(branchLocations.map(getBranchClocksterId).filter(Boolean).map(String))];
+  if (!attendanceLocationIds.length) {
+    attendanceLocationIds.push('17526');
+  }
   const attendanceDay = typeof attendanceDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(attendanceDate)
     ? attendanceDate
     : toYmd(today);
 
-  let attendanceResult = { data: [] };
-  try {
-    const attendanceParams = new URLSearchParams({
-      date_start: attendanceDay,
-      date_end: attendanceDay,
-      locations: resolvedAttendanceLocationId,
-      page: '1',
-    });
-
-    attendanceResult = await requestJson(`/attendance?${attendanceParams.toString()}`);
-  } catch (error) {
-    console.warn('Error fetching Clockster attendance:', error);
+  // Every page for the day is loaded so the list is complete. Locations and pages are fetched one at a
+  // time because the upstream Clockster API rate-limits bursts of concurrent requests.
+  const attendanceRecords = [];
+  for (const locationId of attendanceLocationIds) {
+    try {
+      let page = 1;
+      let totalPages = 1;
+      do {
+        const attendanceParams = new URLSearchParams({
+          date_start: attendanceDay,
+          date_end: attendanceDay,
+          locations: locationId,
+          page: String(page),
+          limit: '100',
+        });
+        const attendanceResult = await requestJson(`/attendance?${attendanceParams.toString()}`);
+        attendanceRecords.push(...(Array.isArray(attendanceResult?.data) ? attendanceResult.data : []));
+        totalPages = Number(attendanceResult?.meta?.last_page || attendanceResult?.last_page || 1);
+        page += 1;
+      } while (page <= totalPages);
+    } catch (error) {
+      console.warn(`Error fetching Clockster attendance for location ${locationId}:`, error);
+    }
   }
 
-  const attendanceRecords = Array.isArray(attendanceResult?.data)
-    ? attendanceResult.data
-    : [];
   const normalizedAttendanceRecords = attendanceRecords
     .slice()
     .sort((a, b) => new Date(b.datetime) - new Date(a.datetime));
