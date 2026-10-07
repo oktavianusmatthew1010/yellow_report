@@ -42,6 +42,8 @@ import {
   loadScheduleReportForLocation,
   loadSalaryScales,
   createSalaryScale,
+  updateSalaryScale,
+  deleteSalaryScale,
   loadSalaryAssignments,
   loadClocksterStaff,
   assignStaffSalary,
@@ -5454,6 +5456,8 @@ function HRISView() {
   const [scaleForm, setScaleForm] = useState({ positionName: '', gajiPokok: '', uangMakan: '', transport: '', kerajinanWeekly: '' });
   const [savingScale, setSavingScale] = useState(false);
   const [savingStaffId, setSavingStaffId] = useState(null);
+  const [editingScale, setEditingScale] = useState(null);
+  const [scaleBusyId, setScaleBusyId] = useState(null);
   const [payrollMonth, setPayrollMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [payroll, setPayroll] = useState({ loading: false, error: '', rows: [], generatedFor: '', source: '', computedAt: null });
   const [staffBranchFilter, setStaffBranchFilter] = useState('');
@@ -5566,6 +5570,76 @@ function HRISView() {
       setState((current) => ({ ...current, error: error instanceof Error ? error.message : 'Failed to create salary scale', message: '' }));
     } finally {
       setSavingScale(false);
+    }
+  };
+
+  const startEditScale = (scale) => {
+    setEditingScale({
+      id: scale.id,
+      positionName: scale.positionName,
+      gajiPokok: String(scale.gajiPokok),
+      uangMakan: String(scale.uangMakan),
+      transport: String(scale.transport),
+      kerajinanWeekly: String(scale.kerajinanWeekly),
+    });
+  };
+
+  const saveScale = async () => {
+    if (!editingScale) return;
+    setScaleBusyId(editingScale.id);
+    try {
+      const scale = await updateSalaryScale(editingScale.id, {
+        positionName: editingScale.positionName,
+        gajiPokok: Number(editingScale.gajiPokok || 0),
+        uangMakan: Number(editingScale.uangMakan || 0),
+        transport: Number(editingScale.transport || 0),
+        kerajinanWeekly: Number(editingScale.kerajinanWeekly || 0),
+      });
+      setState((current) => ({
+        ...current,
+        scales: current.scales.map((item) => (item.id === scale.id ? scale : item)).sort((a, b) => b.totalGaji - a.totalGaji),
+        // Staff on this position pick up the new amounts for the monthly total and the next payroll run.
+        assignments: current.assignments.map((assignment) => (
+          assignment.salaryScaleId === scale.id
+            ? {
+                ...assignment,
+                positionName: scale.positionName,
+                salary: {
+                  gajiPokok: scale.gajiPokok,
+                  uangMakan: scale.uangMakan,
+                  transport: scale.transport,
+                  kerajinanWeekly: scale.kerajinanWeekly,
+                  totalGaji: scale.totalGaji,
+                },
+              }
+            : assignment
+        )),
+        message: `${scale.positionName} updated.`,
+        error: '',
+      }));
+      setEditingScale(null);
+    } catch (error) {
+      setState((current) => ({ ...current, error: error instanceof Error ? error.message : 'Failed to update salary scale', message: '' }));
+    } finally {
+      setScaleBusyId(null);
+    }
+  };
+
+  const removeScale = async (scale) => {
+    if (!window.confirm(`Delete salary scale ${scale.positionName}?`)) return;
+    setScaleBusyId(scale.id);
+    try {
+      await deleteSalaryScale(scale.id);
+      setState((current) => ({
+        ...current,
+        scales: current.scales.filter((item) => item.id !== scale.id),
+        message: `${scale.positionName} deleted.`,
+        error: '',
+      }));
+    } catch (error) {
+      setState((current) => ({ ...current, error: error instanceof Error ? error.message : 'Failed to delete salary scale', message: '' }));
+    } finally {
+      setScaleBusyId(null);
     }
   };
 
@@ -5742,19 +5816,60 @@ function HRISView() {
                 <th>Transport</th>
                 <th>Kerajinan / Minggu</th>
                 <th>Total Gaji</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {state.scales.map((scale) => (
-                <tr key={scale.id}>
-                  <td><strong>{scale.positionName}</strong></td>
-                  <td>{formatRupiah(scale.gajiPokok)}</td>
-                  <td>{formatRupiah(scale.uangMakan)}</td>
-                  <td>{formatRupiah(scale.transport)}</td>
-                  <td>{formatRupiah(scale.kerajinanWeekly)}</td>
-                  <td>{formatRupiah(scale.totalGaji)}</td>
-                </tr>
-              ))}
+              {state.scales.map((scale) => {
+                const isBusy = scaleBusyId === scale.id;
+                const assignedCount = state.assignments.filter((assignment) => assignment.salaryScaleId === scale.id).length;
+
+                if (editingScale?.id === scale.id) {
+                  const previewTotal = Number(editingScale.gajiPokok || 0) + Number(editingScale.uangMakan || 0)
+                    + Number(editingScale.transport || 0) + Number(editingScale.kerajinanWeekly || 0) * 4;
+                  return (
+                    <tr key={scale.id}>
+                      <td><input className="salary-scale-input" value={editingScale.positionName} onChange={(event) => setEditingScale((current) => ({ ...current, positionName: event.target.value }))} /></td>
+                      <td><input type="number" min="0" className="salary-scale-input" value={editingScale.gajiPokok} onChange={(event) => setEditingScale((current) => ({ ...current, gajiPokok: event.target.value }))} /></td>
+                      <td><input type="number" min="0" className="salary-scale-input" value={editingScale.uangMakan} onChange={(event) => setEditingScale((current) => ({ ...current, uangMakan: event.target.value }))} /></td>
+                      <td><input type="number" min="0" className="salary-scale-input" value={editingScale.transport} onChange={(event) => setEditingScale((current) => ({ ...current, transport: event.target.value }))} /></td>
+                      <td><input type="number" min="0" className="salary-scale-input" value={editingScale.kerajinanWeekly} onChange={(event) => setEditingScale((current) => ({ ...current, kerajinanWeekly: event.target.value }))} /></td>
+                      <td>{formatRupiah(previewTotal)}</td>
+                      <td>
+                        <div className="po-actions">
+                          <button type="button" className="opname-button" onClick={saveScale} disabled={isBusy || !editingScale.positionName.trim()}>{isBusy ? 'Saving…' : 'Save'}</button>
+                          <button type="button" className="opname-button" onClick={() => setEditingScale(null)} disabled={isBusy}>Cancel</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                }
+
+                return (
+                  <tr key={scale.id}>
+                    <td><strong>{scale.positionName}</strong></td>
+                    <td>{formatRupiah(scale.gajiPokok)}</td>
+                    <td>{formatRupiah(scale.uangMakan)}</td>
+                    <td>{formatRupiah(scale.transport)}</td>
+                    <td>{formatRupiah(scale.kerajinanWeekly)}</td>
+                    <td>{formatRupiah(scale.totalGaji)}</td>
+                    <td>
+                      <div className="po-actions">
+                        <button type="button" className="opname-button" onClick={() => startEditScale(scale)} disabled={isBusy || Boolean(editingScale)}>Edit</button>
+                        <button
+                          type="button"
+                          className="po-line-remove salary-scale-delete"
+                          onClick={() => removeScale(scale)}
+                          disabled={isBusy || Boolean(editingScale) || assignedCount > 0}
+                          title={assignedCount > 0 ? `Assigned to ${assignedCount} staff` : undefined}
+                        >
+                          {isBusy ? 'Deleting…' : 'Delete'}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

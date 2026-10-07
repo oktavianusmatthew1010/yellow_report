@@ -1477,6 +1477,25 @@ select optgroup {
   padding: 0 10px;
 }
 
+.salary-scale-input {
+  width: 100%;
+  min-width: 90px;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 209, 28, 0.28);
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+  outline: none;
+}
+
+.salary-scale-delete,
+.report-table .po-actions .opname-button {
+  min-height: 30px;
+  padding: 0 10px;
+}
+
 .opname-table {
   overflow-x: auto;
   margin-top: 14px;

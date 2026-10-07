@@ -518,6 +518,21 @@ export const createSalaryScale = async (payload) => {
   return result.data;
 };
 
+export const updateSalaryScale = async (scaleId, payload) => {
+  const result = await requestJson(`/hr/salary-scales/${encodeURIComponent(String(scaleId))}`, {
+    method: 'PUT',
+    body: payload,
+  });
+
+  return result.data;
+};
+
+export const deleteSalaryScale = async (scaleId) => {
+  await requestJson(`/hr/salary-scales/${encodeURIComponent(String(scaleId))}`, {
+    method: 'DELETE',
+  });
+};
+
 export const loadSalaryAssignments = async () => {
   const result = await requestJson('/hr/salary-assignments');
   return Array.isArray(result?.data) ? result.data : [];
