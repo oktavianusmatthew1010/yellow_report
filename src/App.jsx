@@ -5415,6 +5415,12 @@ const buildDailyAttendanceMap = (scheduleEntries = []) => {
         hasSchedule: Boolean(day?.schedule),
         isWorkDay: day?.schedule?.type === 'work',
         isClockedIn: Boolean(day?.in),
+        isLeave: day?.schedule?.type === 'leave' || Boolean(day?.schedule?.leave_type),
+        scheduleTitle: day?.schedule?.title || day?.schedule?.leave_type || day?.schedule?.type || '',
+        timeStart: day?.schedule?.time_start || null,
+        timeEnd: day?.schedule?.time_end || null,
+        clockIn: day?.in || null,
+        clockOut: day?.out || null,
       });
     });
   });
@@ -5466,6 +5472,66 @@ const computeStaffPayrollForMonth = (staffId, salary, attendanceMap, weeks, mont
   return { daysPresent, weeksEarned, weeksEvaluated, gajiPokok, uangMakan, transport, kerajinanEarned, totalGajiPeriod };
 };
 
+// Day-by-day breakdown behind the Days Present / Kerajinan numbers, using the same rules as
+// computeStaffPayrollForMonth so the preview always explains the figures in the table.
+const buildStaffAttendanceDetail = (staffId, attendanceMap, weeks, monthRange, today) => {
+  const DAY_NAMES = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+  let hasAnySchedule = false;
+  for (let day = new Date(monthRange.start); day <= monthRange.end; day.setDate(day.getDate() + 1)) {
+    if (attendanceMap.get(`${staffId}|${toYmd(day)}`)?.hasSchedule) hasAnySchedule = true;
+  }
+
+  return weeks.map((week) => {
+    const days = [];
+    let missedWorkDay = false;
+
+    for (let day = new Date(week.start); day <= week.end; day.setDate(day.getDate() + 1)) {
+      const record = attendanceMap.get(`${staffId}|${toYmd(day)}`);
+      let status = 'No schedule';
+      let tone = 'muted';
+
+      if (day > today) {
+        status = 'Belum';
+      } else if (record?.isWorkDay && record.isClockedIn) {
+        status = 'Hadir';
+        tone = 'good';
+      } else if (record?.isWorkDay) {
+        status = 'Tidak clock-in';
+        tone = 'bad';
+        missedWorkDay = true;
+      } else if (record?.isLeave) {
+        status = 'Leave';
+        tone = 'info';
+      } else if (record?.hasSchedule) {
+        status = 'Off';
+        tone = 'info';
+      }
+
+      days.push({
+        dateKey: toYmd(day),
+        dayLabel: `${DAY_NAMES[day.getDay()]}, ${day.getDate()}`,
+        schedule: record?.isWorkDay
+          ? [record.timeStart, record.timeEnd].filter(Boolean).map((time) => String(time).slice(0, 5)).join(' - ') || 'Work'
+          : (record?.scheduleTitle ? String(record.scheduleTitle).replace(/_/g, ' ') : '-'),
+        clockIn: record?.clockIn ? formatClockLabel(record.clockIn) : '--:--',
+        clockOut: record?.clockOut ? formatClockLabel(record.clockOut) : '--:--',
+        status,
+        tone,
+      });
+    }
+
+    const started = week.start <= today;
+    return {
+      label: week.label,
+      range: `${week.start.getDate()}-${week.end.getDate()}`,
+      days,
+      started,
+      earned: started && hasAnySchedule && !missedWorkDay,
+      presentCount: days.filter((item) => item.status === 'Hadir').length,
+    };
+  });
+};
+
 function HRISView() {
   const [state, setState] = useState({ staff: [], scales: [], assignments: [], loading: true, error: '', message: '' });
   const [scaleForm, setScaleForm] = useState({ positionName: '', gajiPokok: '', uangMakan: '', transport: '', kerajinanWeekly: '' });
@@ -5480,6 +5546,10 @@ function HRISView() {
   const [payrollSearch, setPayrollSearch] = useState('');
   const [payrollPositionFilter, setPayrollPositionFilter] = useState('');
   const [payrollKerajinanFilter, setPayrollKerajinanFilter] = useState('all');
+  const [attendanceDetail, setAttendanceDetail] = useState(null);
+  // Clockster schedule data keyed by `${month}|${locationId}` (or `${month}|all` after a full calculation),
+  // so reopening a preview doesn't call Clockster again.
+  const payrollAttendanceCacheRef = useRef(new Map());
   const [staffPage, setStaffPage] = useState(1);
 
   const reload = async () => {
@@ -5720,6 +5790,7 @@ function HRISView() {
         scheduleEntries.push(...entries);
       }
       const attendanceMap = buildDailyAttendanceMap(scheduleEntries);
+      payrollAttendanceCacheRef.current.set(`${payrollMonth}|all`, attendanceMap);
 
       const rows = assignedStaff.map((person) => {
         const assignment = assignmentByStaffId.get(person.id);
@@ -5742,6 +5813,51 @@ function HRISView() {
   };
 
   const totalPayrollForPeriod = filteredPayrollRows.reduce((sum, row) => sum + row.totalGajiPeriod, 0);
+
+  const openAttendanceDetail = async (row) => {
+    const month = payroll.generatedFor || payrollMonth;
+    const weeks = getPayrollWeeks(month);
+    const monthRange = getPayrollMonthRange(month);
+    if (!weeks.length || !monthRange) return;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const locationId = String(row.branchId ?? '17526');
+    const cache = payrollAttendanceCacheRef.current;
+    const showDetail = (attendanceMap) => setAttendanceDetail({
+      row,
+      month,
+      loading: false,
+      error: '',
+      weeks: buildStaffAttendanceDetail(row.staffId, attendanceMap, weeks, monthRange, today),
+    });
+
+    const cachedMap = cache.get(`${month}|all`) || cache.get(`${month}|${locationId}`);
+    if (cachedMap) {
+      showDetail(cachedMap);
+      return;
+    }
+
+    // Saved payroll runs don't keep daily data, so fetch this staff member's branch for the month.
+    setAttendanceDetail({ row, month, loading: true, error: '', weeks: [] });
+    try {
+      const entries = await loadScheduleReportForLocation({
+        locationId,
+        startDate: toYmd(monthRange.start),
+        endDate: toYmd(monthRange.end),
+      });
+      const attendanceMap = buildDailyAttendanceMap(entries);
+      cache.set(`${month}|${locationId}`, attendanceMap);
+      // Skip if the preview was closed (or switched to someone else) while Clockster was loading.
+      setAttendanceDetail((current) => (current?.row.staffId === row.staffId
+        ? { ...current, loading: false, weeks: buildStaffAttendanceDetail(row.staffId, attendanceMap, weeks, monthRange, today) }
+        : current));
+    } catch (error) {
+      setAttendanceDetail((current) => (current?.row.staffId === row.staffId
+        ? { ...current, loading: false, error: error instanceof Error ? error.message : 'Failed to load attendance' }
+        : current));
+    }
+  };
 
   const handleExportPayroll = () => {
     if (!filteredPayrollRows.length) return;
