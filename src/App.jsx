@@ -5471,6 +5471,9 @@ function HRISView() {
   const [payroll, setPayroll] = useState({ loading: false, error: '', rows: [], generatedFor: '', source: '', computedAt: null });
   const [staffBranchFilter, setStaffBranchFilter] = useState('');
   const [staffSearch, setStaffSearch] = useState('');
+  const [payrollSearch, setPayrollSearch] = useState('');
+  const [payrollPositionFilter, setPayrollPositionFilter] = useState('');
+  const [payrollKerajinanFilter, setPayrollKerajinanFilter] = useState('all');
   const [staffPage, setStaffPage] = useState(1);
 
   const reload = async () => {
@@ -5555,10 +5558,24 @@ function HRISView() {
     [filteredStaff, staffPageClamped]
   );
 
+  const payrollPositionOptions = useMemo(
+    () => [...new Set(payroll.rows.map((row) => row.positionName).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [payroll.rows]
+  );
+
   const filteredPayrollRows = useMemo(() => {
-    if (!staffBranchFilter) return payroll.rows;
-    return payroll.rows.filter((row) => String(row.branchId ?? '') === staffBranchFilter);
-  }, [payroll.rows, staffBranchFilter]);
+    const query = payrollSearch.trim().toLowerCase();
+    return payroll.rows.filter((row) => {
+      if (staffBranchFilter && String(row.branchId ?? '') !== staffBranchFilter) return false;
+      if (payrollPositionFilter && row.positionName !== payrollPositionFilter) return false;
+      if (payrollKerajinanFilter === 'full' && !(row.weeksEvaluated > 0 && row.weeksEarned === row.weeksEvaluated)) return false;
+      if (payrollKerajinanFilter === 'partial' && !(row.weeksEarned > 0 && row.weeksEarned < row.weeksEvaluated)) return false;
+      if (payrollKerajinanFilter === 'none' && row.weeksEarned !== 0) return false;
+      if (!query) return true;
+      return [row.name, row.branch, row.positionName, row.staffId].join(' ').toLowerCase().includes(query);
+    });
+  }, [payroll.rows, staffBranchFilter, payrollPositionFilter, payrollKerajinanFilter, payrollSearch]);
+  const hasPayrollFilter = Boolean(payrollSearch.trim() || payrollPositionFilter || payrollKerajinanFilter !== 'all');
 
   const unassignedCount = state.staff.filter((person) => !assignmentByStaffId.get(person.id)).length;
   const totalMonthlyPayroll = state.assignments.reduce((sum, assignment) => sum + Number(assignment.salary?.totalGaji || 0), 0);
@@ -6020,6 +6037,54 @@ function HRISView() {
         ) : null}
         {!payroll.loading && !payroll.error && payroll.generatedFor && !payroll.rows.length ? (
           <div className="finance-empty mono">No staff with an assigned salary position yet.</div>
+        ) : null}
+
+        {payroll.rows.length ? (
+          <div className="management-filter-row payroll-filter-row">
+            <label className="management-filter">
+              <span className="mono">SEARCH</span>
+              <input
+                type="search"
+                className="management-search-input"
+                value={payrollSearch}
+                onChange={(event) => setPayrollSearch(event.target.value)}
+                placeholder="Search name, branch, position..."
+              />
+            </label>
+            <label className="management-filter">
+              <span className="mono">POSITION</span>
+              <select className="management-select" value={payrollPositionFilter} onChange={(event) => setPayrollPositionFilter(event.target.value)}>
+                <option value="">All Positions</option>
+                {payrollPositionOptions.map((position) => <option key={position} value={position}>{position}</option>)}
+              </select>
+            </label>
+            <label className="management-filter">
+              <span className="mono">KERAJINAN</span>
+              <select className="management-select" value={payrollKerajinanFilter} onChange={(event) => setPayrollKerajinanFilter(event.target.value)}>
+                <option value="all">All</option>
+                <option value="full">Full (all periods)</option>
+                <option value="partial">Partial</option>
+                <option value="none">None</option>
+              </select>
+            </label>
+            {hasPayrollFilter ? (
+              <button
+                type="button"
+                className="opname-button"
+                onClick={() => {
+                  setPayrollSearch('');
+                  setPayrollPositionFilter('');
+                  setPayrollKerajinanFilter('all');
+                }}
+              >
+                Reset
+              </button>
+            ) : null}
+            <div className="panel-meta">{filteredPayrollRows.length} / {payroll.rows.length} STAFF</div>
+          </div>
+        ) : null}
+        {payroll.rows.length && !filteredPayrollRows.length ? (
+          <div className="finance-empty mono">NO STAFF MATCH THE CURRENT FILTER.</div>
         ) : null}
 
         {filteredPayrollRows.length ? (

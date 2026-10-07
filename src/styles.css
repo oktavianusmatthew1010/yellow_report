@@ -1453,6 +1453,21 @@ select optgroup {
   box-shadow: 0 0 0 3px rgba(255, 209, 28, 0.08);
 }
 
+.payroll-filter-row {
+  justify-content: flex-start;
+  margin-top: 14px;
+}
+
+.payroll-filter-row .opname-button {
+  min-height: 46px;
+  padding: 0 16px;
+}
+
+.payroll-filter-row .panel-meta {
+  margin-left: auto;
+  align-self: center;
+}
+
 .coa-filter-row {
   justify-content: flex-start;
   margin-top: 12px;
