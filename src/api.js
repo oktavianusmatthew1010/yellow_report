@@ -337,6 +337,21 @@ export const createAccountingAccount = async (payload) => {
   return result.data;
 };
 
+export const updateAccountingAccount = async (accountId, payload) => {
+  const result = await requestJson(`/accounting/coa/${encodeURIComponent(String(accountId))}`, {
+    method: 'PUT',
+    body: payload,
+  });
+
+  return result.data;
+};
+
+export const deleteAccountingAccount = async (accountId) => {
+  await requestJson(`/accounting/coa/${encodeURIComponent(String(accountId))}`, {
+    method: 'DELETE',
+  });
+};
+
 export const createAccountingJournal = async (payload) => {
   const result = await requestJson('/accounting/journals', {
     method: 'POST',

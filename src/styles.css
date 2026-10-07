@@ -1453,6 +1453,30 @@ select optgroup {
   box-shadow: 0 0 0 3px rgba(255, 209, 28, 0.08);
 }
 
+.coa-filter-row {
+  justify-content: flex-start;
+  margin-top: 12px;
+}
+
+.coa-row-editing input,
+.coa-row-editing select {
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 209, 28, 0.28);
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+  outline: none;
+}
+
+.coa-row .po-actions .opname-button,
+.coa-delete-button {
+  min-height: 30px;
+  padding: 0 10px;
+}
+
 .opname-table {
   overflow-x: auto;
   margin-top: 14px;
@@ -1473,10 +1497,10 @@ select optgroup {
 .coa-head,
 .coa-row {
   display: grid;
-  grid-template-columns: 90px minmax(210px, 1fr) 105px 105px;
+  grid-template-columns: 90px minmax(210px, 1fr) 105px 105px 160px;
   gap: 10px;
   align-items: center;
-  min-width: 540px;
+  min-width: 720px;
   padding: 11px;
   font-size: 0.82rem;
 }

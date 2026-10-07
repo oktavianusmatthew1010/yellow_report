@@ -22,6 +22,8 @@ import {
   updateInventoryStockCount,
   loadAccountingSystem,
   createAccountingAccount,
+  updateAccountingAccount,
+  deleteAccountingAccount,
   createAccountingJournal,
   loadItemMaster,
   createItemMaster,
@@ -6222,6 +6224,10 @@ function AccountingView({ dashboard }) {
   const today = new Date().toISOString().slice(0, 10);
   const [state, setState] = useState({ accounts: [], journals: [], loading: true, error: '', message: '' });
   const [accountForm, setAccountForm] = useState({ code: '', name: '', type: 'asset' });
+  const [coaSearch, setCoaSearch] = useState('');
+  const [coaTypeFilter, setCoaTypeFilter] = useState('all');
+  const [editingAccount, setEditingAccount] = useState(null);
+  const [coaBusyId, setCoaBusyId] = useState(null);
   const [journalForm, setJournalForm] = useState({
     journalDate: today,
     description: '',
@@ -6242,6 +6248,13 @@ function AccountingView({ dashboard }) {
   }, []);
 
   const accountMap = new Map(state.accounts.map((account) => [String(account.code), account]));
+  const coaSearchTerm = coaSearch.trim().toLowerCase();
+  const visibleAccounts = state.accounts.filter((account) => (
+    (coaTypeFilter === 'all' || account.type === coaTypeFilter)
+    && (!coaSearchTerm
+      || String(account.code).toLowerCase().includes(coaSearchTerm)
+      || String(account.name || '').toLowerCase().includes(coaSearchTerm))
+  ));
   const totalDebit = journalForm.lines.reduce((sum, line) => sum + Number(line.debit || 0), 0);
   const totalCredit = journalForm.lines.reduce((sum, line) => sum + Number(line.credit || 0), 0);
 
@@ -6261,6 +6274,67 @@ function AccountingView({ dashboard }) {
       setAccountForm({ code: '', name: '', type: 'asset' });
     } catch (error) {
       setState((current) => ({ ...current, error: error instanceof Error ? error.message : 'Failed to create account', message: '' }));
+    }
+  };
+
+  const replaceJournalAccountCode = (fromCode, toCode) => {
+    setJournalForm((current) => ({
+      ...current,
+      lines: current.lines.map((line) => (String(line.accountCode) === String(fromCode) ? { ...line, accountCode: toCode } : line)),
+    }));
+  };
+
+  const startEditAccount = (account) => {
+    setEditingAccount({ id: account.id, code: account.code, name: account.name, type: account.type });
+  };
+
+  const saveAccount = async () => {
+    if (!editingAccount) return;
+    const previous = state.accounts.find((account) => account.id === editingAccount.id);
+    setCoaBusyId(editingAccount.id);
+    try {
+      const updated = await updateAccountingAccount(editingAccount.id, {
+        code: editingAccount.code,
+        name: editingAccount.name,
+        type: editingAccount.type,
+      });
+      setState((current) => ({
+        ...current,
+        accounts: current.accounts
+          .map((account) => (account.id === updated.id ? updated : account))
+          .sort((a, b) => String(a.code).localeCompare(String(b.code))),
+        message: `Account ${updated.code} updated.`,
+        error: '',
+      }));
+      if (previous && String(previous.code) !== String(updated.code)) {
+        replaceJournalAccountCode(previous.code, updated.code);
+      }
+      setEditingAccount(null);
+    } catch (error) {
+      setState((current) => ({ ...current, error: error instanceof Error ? error.message : 'Failed to update account', message: '' }));
+    } finally {
+      setCoaBusyId(null);
+    }
+  };
+
+  const removeAccount = async (account) => {
+    if (!window.confirm(`Delete account ${account.code} - ${account.name}?`)) return;
+    setCoaBusyId(account.id);
+    try {
+      await deleteAccountingAccount(account.id);
+      const remaining = state.accounts.filter((item) => item.id !== account.id);
+      setState((current) => ({
+        ...current,
+        accounts: current.accounts.filter((item) => item.id !== account.id),
+        message: `Account ${account.code} deleted.`,
+        error: '',
+      }));
+      replaceJournalAccountCode(account.code, remaining[0]?.code || '');
+      if (editingAccount?.id === account.id) setEditingAccount(null);
+    } catch (error) {
+      setState((current) => ({ ...current, error: error instanceof Error ? error.message : 'Failed to delete account', message: '' }));
+    } finally {
+      setCoaBusyId(null);
     }
   };
 
@@ -6332,10 +6406,62 @@ function AccountingView({ dashboard }) {
       </section>
 
       <section className="panel accounting-wide-panel">
-        <div className="panel-title">CHART OF ACCOUNTS</div>
+        <div className="panel-head">
+          <div className="panel-title">CHART OF ACCOUNTS</div>
+          <div className="panel-meta">{visibleAccounts.length} / {state.accounts.length}</div>
+        </div>
+        <div className="management-filter-row coa-filter-row">
+          <label className="management-filter">
+            <span className="mono">SEARCH</span>
+            <input
+              className="management-search-input"
+              value={coaSearch}
+              onChange={(event) => setCoaSearch(event.target.value)}
+              placeholder="Search code or name..."
+            />
+          </label>
+          <label className="management-filter">
+            <span className="mono">TYPE</span>
+            <select className="management-select" value={coaTypeFilter} onChange={(event) => setCoaTypeFilter(event.target.value)}>
+              <option value="all">All Types</option>
+              <option value="asset">Asset</option><option value="liability">Liability</option><option value="equity">Equity</option><option value="income">Income</option><option value="expense">Expense</option>
+            </select>
+          </label>
+        </div>
         <div className="opname-table">
-          <div className="coa-head mono"><span>Code</span><span>Name</span><span>Type</span><span>Normal</span></div>
-          {state.accounts.map((account) => <div key={account.code} className="coa-row"><strong>{account.code}</strong><span>{account.name}</span><span>{account.type}</span><span>{account.normalBalance}</span></div>)}
+          <div className="coa-head mono"><span>Code</span><span>Name</span><span>Type</span><span>Normal</span><span>Actions</span></div>
+          {visibleAccounts.map((account) => {
+            const isEditing = editingAccount?.id === account.id;
+            const isBusy = coaBusyId === account.id;
+
+            if (isEditing) {
+              return (
+                <div key={account.id ?? account.code} className="coa-row coa-row-editing">
+                  <input value={editingAccount.code} onChange={(event) => setEditingAccount((current) => ({ ...current, code: event.target.value }))} placeholder="Code" />
+                  <input value={editingAccount.name} onChange={(event) => setEditingAccount((current) => ({ ...current, name: event.target.value }))} placeholder="Name" />
+                  <select value={editingAccount.type} onChange={(event) => setEditingAccount((current) => ({ ...current, type: event.target.value }))}>
+                    <option value="asset">Asset</option><option value="liability">Liability</option><option value="equity">Equity</option><option value="income">Income</option><option value="expense">Expense</option>
+                  </select>
+                  <span>{['asset', 'expense'].includes(editingAccount.type) ? 'debit' : 'credit'}</span>
+                  <div className="po-actions">
+                    <button type="button" className="opname-button" onClick={saveAccount} disabled={isBusy || !editingAccount.code.trim() || !editingAccount.name.trim()}>{isBusy ? 'Saving…' : 'Save'}</button>
+                    <button type="button" className="opname-button" onClick={() => setEditingAccount(null)} disabled={isBusy}>Cancel</button>
+                  </div>
+                </div>
+              );
+            }
+
+            return (
+              <div key={account.id ?? account.code} className="coa-row">
+                <strong>{account.code}</strong><span>{account.name}</span><span>{account.type}</span><span>{account.normalBalance}</span>
+                <div className="po-actions">
+                  <button type="button" className="opname-button" onClick={() => startEditAccount(account)} disabled={isBusy || Boolean(editingAccount)}>Edit</button>
+                  <button type="button" className="po-line-remove coa-delete-button" onClick={() => removeAccount(account)} disabled={isBusy || Boolean(editingAccount)}>{isBusy ? 'Deleting…' : 'Delete'}</button>
+                </div>
+              </div>
+            );
+          })}
+          {!state.loading && !visibleAccounts.length ? <div className="finance-empty mono">NO ACCOUNTS MATCH THE CURRENT FILTER.</div> : null}
         </div>
       </section>
 
