@@ -6232,8 +6232,16 @@ function HRISView() {
                     <td><strong>{row.name}</strong></td>
                     <td>{row.branch}</td>
                     <td>{row.positionName}</td>
-                    <td>{row.daysPresent}</td>
-                    <td>{row.weeksEarned}/{row.weeksEvaluated}</td>
+                    <td>
+                      <button type="button" className="payroll-detail-link" onClick={() => openAttendanceDetail(row)} title="Lihat detail kehadiran">
+                        {row.daysPresent}
+                      </button>
+                    </td>
+                    <td>
+                      <button type="button" className="payroll-detail-link" onClick={() => openAttendanceDetail(row)} title="Lihat detail kerajinan">
+                        {row.weeksEarned}/{row.weeksEvaluated}
+                      </button>
+                    </td>
                     <td>{formatRupiah(row.gajiPokok)}</td>
                     <td>{formatRupiah(row.uangMakan)}</td>
                     <td>{formatRupiah(row.transport)}</td>
@@ -6246,6 +6254,73 @@ function HRISView() {
           </div>
         ) : null}
       </section>
+
+      {attendanceDetail ? (
+        <div className="payroll-detail-backdrop" role="presentation" onClick={() => setAttendanceDetail(null)}>
+          <section
+            className="payroll-detail-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Detail kehadiran ${attendanceDetail.row.name}`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="payroll-detail-header">
+              <div>
+                <div className="panel-title">DETAIL KEHADIRAN</div>
+                <div className="payroll-detail-name">{attendanceDetail.row.name}</div>
+                <div className="panel-subtitle mono">
+                  {attendanceDetail.row.branch} • {attendanceDetail.row.positionName} • {attendanceDetail.month}
+                </div>
+              </div>
+              <button type="button" className="chat-modal-close" onClick={() => setAttendanceDetail(null)} aria-label="Close attendance detail">×</button>
+            </div>
+
+            <div className="payroll-detail-summary">
+              <div><span className="mono">DAYS PRESENT</span><strong>{attendanceDetail.row.daysPresent}</strong></div>
+              <div><span className="mono">KERAJINAN</span><strong>{attendanceDetail.row.weeksEarned}/{attendanceDetail.row.weeksEvaluated} WEEK</strong></div>
+              <div><span className="mono">UANG KERAJINAN</span><strong>{formatRupiah(attendanceDetail.row.kerajinanEarned)}</strong></div>
+            </div>
+
+            {attendanceDetail.loading ? <div className="finance-empty mono">LOADING ATTENDANCE FROM CLOCKSTER...</div> : null}
+            {attendanceDetail.error ? <div className="finance-empty mono">{attendanceDetail.error}</div> : null}
+
+            <div className="payroll-detail-body">
+              {attendanceDetail.weeks.map((week) => (
+                <div key={week.label} className="payroll-detail-week">
+                  <div className="payroll-detail-week-head">
+                    <strong>{week.label} <span className="mono">(TGL {week.range})</span></strong>
+                    <span className={`payroll-detail-badge payroll-detail-badge-${!week.started ? 'muted' : week.earned ? 'good' : 'bad'}`}>
+                      {!week.started ? 'BELUM DIMULAI' : week.earned ? 'DAPAT KERAJINAN' : 'TIDAK DAPAT'}
+                    </span>
+                  </div>
+                  <table className="report-table payroll-detail-table">
+                    <thead>
+                      <tr><th>Tanggal</th><th>Jadwal</th><th>Clock In</th><th>Clock Out</th><th>Status</th></tr>
+                    </thead>
+                    <tbody>
+                      {week.days.map((day) => (
+                        <tr key={day.dateKey}>
+                          <td>{day.dayLabel}</td>
+                          <td>{day.schedule}</td>
+                          <td className="mono">{day.clockIn}</td>
+                          <td className="mono">{day.clockOut}</td>
+                          <td><span className={`payroll-detail-badge payroll-detail-badge-${day.tone}`}>{day.status}</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+              {!attendanceDetail.loading && !attendanceDetail.error && attendanceDetail.weeks.some((week) => week.days.length) ? (
+                <div className="finance-empty mono">
+                  Hari off / leave dihitung hadir. Hari kerja tanpa clock-in = tidak dapat uang kerajinan di week tersebut.
+                  {attendanceDetail.weeks.some((week) => week.days.some((day) => day.status === 'Hadir')) ? '' : ' Tidak ada data clock-in untuk bulan ini.'}
+                </div>
+              ) : null}
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }
