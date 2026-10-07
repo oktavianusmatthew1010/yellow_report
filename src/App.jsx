@@ -5387,10 +5387,10 @@ const getPayrollWeeks = (monthStr) => {
   const monthIndex = Number(monthNumStr) - 1;
   if (!Number.isFinite(year) || !Number.isFinite(monthIndex)) return [];
 
-  // Kerajinan periods are fixed calendar dates, not Mon-Sun weeks. Days 29-31 fall outside every
-  // period, so a month pays at most 4x kerajinan.
-  return [[1, 8], [9, 15], [16, 22], [23, 28]].map(([start, end], index) => ({
-    label: `Minggu ${index + 1}`,
+  // Kerajinan weeks are fixed calendar dates, not Mon-Sun weeks; week 4 runs to the month's last day.
+  const lastDay = new Date(year, monthIndex + 1, 0).getDate();
+  return [[1, 8], [9, 15], [16, 23], [24, lastDay]].map(([start, end], index) => ({
+    label: `Week ${index + 1}`,
     start: new Date(year, monthIndex, start),
     end: new Date(year, monthIndex, end),
   }));
@@ -5426,7 +5426,7 @@ const computeStaffPayrollForMonth = (staffId, salary, attendanceMap, weeks, mont
   let weeksEarned = 0;
   let weeksEvaluated = 0;
 
-  // Days present covers the whole month, including days 29-31 that sit outside the kerajinan periods.
+  // Days present covers the whole month.
   for (let day = new Date(monthRange.start); day <= monthRange.end; day.setDate(day.getDate() + 1)) {
     if (day > today) continue;
     const record = attendanceMap.get(`${staffId}|${toYmd(day)}`);
@@ -5832,7 +5832,7 @@ function HRISView() {
           <div className="panel-title">SALARY SCALE (IMPORTED FROM LIST GAJI DAN TARGET.XLSX)</div>
           <div className="panel-meta">{state.scales.length} POSITIONS</div>
         </div>
-        <div className="finance-empty mono">Uang kerajinan dihitung mingguan: minggu 1 (tgl 1-8), minggu 2 (9-15), minggu 3 (16-22), minggu 4 (23-28). Total gaji = gaji pokok + uang makan + transport + (kerajinan x 4 minggu).</div>
+        <div className="finance-empty mono">Uang kerajinan dihitung per week: week 1 (tgl 1-8), week 2 (tgl 9-15), week 3 (tgl 16-23), week 4 (tgl 24-30/31). Total gaji = gaji pokok + uang makan + transport + (kerajinan x 4 minggu).</div>
         <div className="report-table-wrap">
           <table className="report-table">
             <thead>
@@ -5996,7 +5996,7 @@ function HRISView() {
         <div className="panel-head">
           <div>
             <div className="panel-title">HITUNG GAJI (PAYROLL)</div>
-            <div className="panel-subtitle mono">GAJI POKOK PENUH SETIAP BULAN • KERAJINAN PER MINGGU (1-8, 9-15, 16-22, 23-28) DIBAYAR PENUH JIKA HADIR LENGKAP (CLOCK-IN &amp; CLOCK-OUT) DI SETIAP HARI KERJA TERJADWAL MINGGU TSB • HARI OFF/LEAVE DIKECUALIKAN</div>
+            <div className="panel-subtitle mono">GAJI POKOK PENUH SETIAP BULAN • KERAJINAN PER WEEK: WEEK 1 (TGL 1-8), WEEK 2 (TGL 9-15), WEEK 3 (TGL 16-23), WEEK 4 (TGL 24-30/31) DIBAYAR PENUH JIKA HADIR LENGKAP (CLOCK-IN &amp; CLOCK-OUT) DI SETIAP HARI KERJA TERJADWAL MINGGU TSB • HARI OFF/LEAVE DIKECUALIKAN</div>
           </div>
           <div className="panel-meta">{filteredPayrollRows.length ? `${formatRupiah(totalPayrollForPeriod)} TOTAL` : ''}</div>
         </div>
