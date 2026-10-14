@@ -1716,6 +1716,20 @@ select optgroup {
   font-size: 0.82rem;
 }
 
+.supplier-import-title {
+  margin-top: 18px;
+}
+
+.supplier-import-preview {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid rgba(255, 209, 28, 0.12);
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--text-dim);
+  font-size: 0.72rem;
+}
+
 .supplier-head,
 .supplier-row {
   display: grid;

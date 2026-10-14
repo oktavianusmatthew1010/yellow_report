@@ -33,6 +33,7 @@ import {
   loadStockTransfers,
   loadSuppliers,
   createSupplier,
+  importSuppliers,
   loadPurchaseOrders,
   createPurchaseOrder,
   receivePurchaseOrder,
@@ -4579,12 +4580,91 @@ function BranchStockView({ dashboard }) {
   );
 }
 
+const SUPPLIER_TEMPLATE_COLUMNS = [
+  { key: 'name', header: 'Supplier Name', aliases: ['nama supplier', 'nama', 'supplier', 'name'], width: 32 },
+  { key: 'contactPerson', header: 'Contact Person', aliases: ['kontak', 'nama kontak', 'pic', 'contact'], width: 24 },
+  { key: 'phone', header: 'Phone', aliases: ['telepon', 'no telepon', 'no hp', 'hp', 'telp'], width: 18 },
+  { key: 'email', header: 'Email', aliases: ['e-mail'], width: 28 },
+  { key: 'address', header: 'Address', aliases: ['alamat'], width: 40 },
+  { key: 'notes', header: 'Notes', aliases: ['catatan', 'keterangan'], width: 30 },
+];
+
+const SUPPLIER_TEMPLATE_EXAMPLE_NAME = 'PT Contoh Supplier';
+
+const normalizeHeader = (value) => String(value ?? '').toLowerCase().replace(/[*_]/g, ' ').replace(/\s+/g, ' ').trim();
+
+const downloadSupplierTemplate = async () => {
+  const XLSX = await import('xlsx');
+  const headers = SUPPLIER_TEMPLATE_COLUMNS.map((column) => column.header);
+  const example = [SUPPLIER_TEMPLATE_EXAMPLE_NAME, 'Budi', '081234567890', 'budi@contoh.co.id', 'Jl. Contoh No. 1, Jakarta', 'Contoh baris, hapus sebelum import'];
+  const sheet = XLSX.utils.aoa_to_sheet([headers, example]);
+  sheet['!cols'] = SUPPLIER_TEMPLATE_COLUMNS.map((column) => ({ wch: column.width }));
+  // Phone column as text so leading zeros survive when users type numbers.
+  for (let row = 1; row <= 500; row += 1) {
+    const ref = XLSX.utils.encode_cell({ r: row, c: 2 });
+    sheet[ref] = { ...(sheet[ref] || { t: 's', v: '' }), t: 's', z: '@' };
+  }
+  sheet['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: 500, c: headers.length - 1 } });
+
+  const guide = XLSX.utils.aoa_to_sheet([
+    ['Petunjuk Import Supplier'],
+    [''],
+    ['1. Isi data di sheet "Suppliers", satu supplier per baris. Jangan ubah judul kolom.'],
+    ['2. Supplier Name wajib diisi. Kolom lain opsional.'],
+    ['3. Jika nama supplier sudah ada di sistem, datanya akan diperbarui (tidak dobel).'],
+    ['4. Baris contoh (PT Contoh Supplier) boleh dihapus; baris itu otomatis diabaikan saat import.'],
+    ['5. Simpan sebagai .xlsx lalu upload di menu Purchasing > Import Supplier.'],
+  ]);
+  guide['!cols'] = [{ wch: 90 }];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, 'Suppliers');
+  XLSX.utils.book_append_sheet(workbook, guide, 'Petunjuk');
+  XLSX.writeFile(workbook, 'template_import_supplier.xlsx');
+};
+
+const parseSupplierWorkbook = async (file) => {
+  const XLSX = await import('xlsx');
+  const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+  const sheetName = workbook.SheetNames.find((name) => name.toLowerCase() === 'suppliers') || workbook.SheetNames[0];
+  const matrix = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: '', raw: true, blankrows: false });
+  if (!matrix.length) throw new Error('File is empty.');
+
+  const headerRow = matrix[0].map(normalizeHeader);
+  const columnIndex = {};
+  SUPPLIER_TEMPLATE_COLUMNS.forEach((column) => {
+    const names = [normalizeHeader(column.header), ...column.aliases];
+    const index = headerRow.findIndex((header) => names.includes(header));
+    if (index >= 0) columnIndex[column.key] = index;
+  });
+  if (columnIndex.name === undefined) {
+    throw new Error('Column "Supplier Name" not found. Please use the downloaded template.');
+  }
+
+  const rows = [];
+  matrix.slice(1).forEach((cells, offset) => {
+    const row = { rowNumber: offset + 2 };
+    SUPPLIER_TEMPLATE_COLUMNS.forEach((column) => {
+      const raw = columnIndex[column.key] === undefined ? '' : cells[columnIndex[column.key]];
+      let text = String(raw ?? '').trim();
+      // Phone typed as a number loses its leading 0 (e.g. 81234567890).
+      if (column.key === 'phone' && typeof raw === 'number' && /^8\d{7,12}$/.test(text)) text = `0${text}`;
+      row[column.key] = text;
+    });
+    if (row.name === SUPPLIER_TEMPLATE_EXAMPLE_NAME) return;
+    if (SUPPLIER_TEMPLATE_COLUMNS.some((column) => row[column.key])) rows.push(row);
+  });
+  return rows;
+};
+
 function PurchasingView({ dashboard }) {
   const branches = Array.isArray(dashboard?.branchLocations) ? dashboard.branchLocations : [];
   const today = new Date().toISOString().slice(0, 10);
   const [state, setState] = useState({ suppliers: [], orders: [], items: [], loading: true, error: '', message: '' });
   const [supplierForm, setSupplierForm] = useState({ name: '', contactPerson: '', phone: '', email: '', address: '', notes: '' });
   const [savingSupplier, setSavingSupplier] = useState(false);
+  const [supplierImport, setSupplierImport] = useState({ fileName: '', rows: [], importing: false, result: null });
+  const supplierFileRef = useRef(null);
   const [poForm, setPoForm] = useState({
     supplierId: '',
     branchId: '',
@@ -4645,6 +4725,51 @@ function PurchasingView({ dashboard }) {
       setState((current) => ({ ...current, error: error instanceof Error ? error.message : 'Failed to create supplier', message: '' }));
     } finally {
       setSavingSupplier(false);
+    }
+  };
+
+  const resetSupplierImport = () => {
+    setSupplierImport({ fileName: '', rows: [], importing: false, result: null });
+    if (supplierFileRef.current) supplierFileRef.current.value = '';
+  };
+
+  const handleDownloadSupplierTemplate = async () => {
+    try {
+      await downloadSupplierTemplate();
+    } catch (error) {
+      setState((current) => ({ ...current, error: error instanceof Error ? error.message : 'Failed to create template', message: '' }));
+    }
+  };
+
+  const handleSupplierFile = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const rows = await parseSupplierWorkbook(file);
+      setSupplierImport({ fileName: file.name, rows, importing: false, result: null });
+      setState((current) => ({ ...current, error: rows.length ? '' : `${file.name} has no supplier rows.`, message: '' }));
+    } catch (error) {
+      resetSupplierImport();
+      setState((current) => ({ ...current, error: error instanceof Error ? error.message : 'Failed to read Excel file', message: '' }));
+    }
+  };
+
+  const submitSupplierImport = async () => {
+    setSupplierImport((current) => ({ ...current, importing: true }));
+    try {
+      const result = await importSuppliers(supplierImport.rows);
+      const suppliers = await loadSuppliers();
+      setSupplierImport((current) => ({ ...current, importing: false, rows: [], result }));
+      if (supplierFileRef.current) supplierFileRef.current.value = '';
+      setState((current) => ({
+        ...current,
+        suppliers,
+        message: `Supplier import done: ${result.created} created, ${result.updated} updated, ${result.failed} failed.`,
+        error: '',
+      }));
+    } catch (error) {
+      setSupplierImport((current) => ({ ...current, importing: false }));
+      setState((current) => ({ ...current, error: error instanceof Error ? error.message : 'Failed to import suppliers', message: '' }));
     }
   };
 
@@ -4732,6 +4857,32 @@ function PurchasingView({ dashboard }) {
           <input value={supplierForm.address} onChange={(event) => setSupplierForm((current) => ({ ...current, address: event.target.value }))} placeholder="Address (optional)" />
           <button type="submit" className="opname-button" disabled={savingSupplier}>{savingSupplier ? 'Saving' : 'Add Supplier'}</button>
         </form>
+
+        <div className="panel-title supplier-import-title">IMPORT SUPPLIER (EXCEL)</div>
+        <div className="accounting-form">
+          <button type="button" className="opname-button" onClick={handleDownloadSupplierTemplate}>Download Template</button>
+          <input ref={supplierFileRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleSupplierFile} />
+          {supplierImport.rows.length ? (
+            <>
+              <div className="finance-net-row"><span>{supplierImport.fileName}</span><strong>{supplierImport.rows.length} rows</strong></div>
+              <div className="supplier-import-preview mono">
+                {supplierImport.rows.slice(0, 5).map((row) => (
+                  <div key={row.rowNumber}>{row.rowNumber}. {row.name || '(no name)'}{row.phone ? ` • ${row.phone}` : ''}</div>
+                ))}
+                {supplierImport.rows.length > 5 ? <div>… {supplierImport.rows.length - 5} more</div> : null}
+              </div>
+              <button type="button" className="opname-button" onClick={submitSupplierImport} disabled={supplierImport.importing}>
+                {supplierImport.importing ? 'Importing' : `Import ${supplierImport.rows.length} Suppliers`}
+              </button>
+              <button type="button" className="opname-button" onClick={resetSupplierImport} disabled={supplierImport.importing}>Cancel</button>
+            </>
+          ) : null}
+          {supplierImport.result?.errors?.length ? (
+            <div className="supplier-import-preview mono">
+              {supplierImport.result.errors.map((item) => <div key={`${item.row}-${item.error}`}>Row {item.row}: {item.error}</div>)}
+            </div>
+          ) : null}
+        </div>
       </section>
 
       <section className="panel accounting-form-panel">

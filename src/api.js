@@ -468,6 +468,15 @@ export const createSupplier = async (payload) => {
   return result.data;
 };
 
+export const importSuppliers = async (rows) => {
+  const result = await requestJson('/suppliers/import', {
+    method: 'POST',
+    body: { rows },
+  });
+
+  return result.data;
+};
+
 export const loadPurchaseOrders = async ({ status, supplierId, branchId } = {}) => {
   const params = new URLSearchParams();
   if (status) params.set('status', status);
