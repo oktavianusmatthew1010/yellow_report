@@ -5579,39 +5579,54 @@ const buildDailyAttendanceMap = (scheduleEntries = []) => {
   return byUserDate;
 };
 
+// Kerajinan only looks at actual attendance (clock-in AND clock-out), not at whether the day was
+// scheduled as work. A day passes when the staff clocked in and out, or it is a leave / scheduled
+// off day. Any other day (work day or unscheduled day) without both clock-in and clock-out fails.
+// Today with a clock-in but no clock-out yet is still in progress, so it doesn't fail.
+const classifyKerajinanDay = (record, day, today) => {
+  if (day > today) return { status: 'Belum', tone: 'muted', complete: false, failed: false };
+  if (record?.clockIn && record?.clockOut) return { status: 'Hadir', tone: 'good', complete: true, failed: false };
+  if (record?.isLeave) return { status: 'Leave', tone: 'info', complete: false, failed: false };
+  if (record?.hasSchedule && !record.isWorkDay) return { status: 'Off', tone: 'info', complete: false, failed: false };
+  if (record?.clockIn) {
+    return day.getTime() === today.getTime()
+      ? { status: 'Belum clock-out', tone: 'muted', complete: false, failed: false }
+      : { status: 'Tidak clock-out', tone: 'bad', complete: false, failed: true };
+  }
+  return { status: 'Tidak absen', tone: 'bad', complete: false, failed: true };
+};
+
+// A week earns kerajinan only if no day in it failed AND it has at least one day with clock-in +
+// clock-out (no attendance at all = no kerajinan, even if the rest of the week is leave/off).
+const evaluateKerajinanWeek = (staffId, attendanceMap, week, today) => {
+  let failed = false;
+  let completeDays = 0;
+  for (let day = new Date(week.start); day <= week.end; day.setDate(day.getDate() + 1)) {
+    const result = classifyKerajinanDay(attendanceMap.get(`${staffId}|${toYmd(day)}`), day, today);
+    if (result.failed) failed = true;
+    if (result.complete) completeDays += 1;
+  }
+  return { started: week.start <= today, earned: week.start <= today && !failed && completeDays > 0 };
+};
+
 const computeStaffPayrollForMonth = (staffId, salary, attendanceMap, weeks, monthRange, today) => {
   let daysPresent = 0;
   let weeksEarned = 0;
   let weeksEvaluated = 0;
-  let hasAnySchedule = false;
 
-  // Days present covers the whole month.
+  // Days present = days in the month with both clock-in and clock-out.
   for (let day = new Date(monthRange.start); day <= monthRange.end; day.setDate(day.getDate() + 1)) {
-    const record = attendanceMap.get(`${staffId}|${toYmd(day)}`);
-    if (record?.hasSchedule) hasAnySchedule = true;
     if (day > today) continue;
-    if (record?.isWorkDay && record.isClockedIn) daysPresent += 1;
+    const record = attendanceMap.get(`${staffId}|${toYmd(day)}`);
+    if (record?.clockIn && record?.clockOut) daysPresent += 1;
   }
 
-  // A week earns kerajinan unless a scheduled work day in it has no clock-in. Off/leave days count as
-  // attended. Weeks that haven't started yet aren't evaluated, and staff with no Clockster schedule
-  // this month earn nothing.
+  // Weeks that haven't started yet aren't evaluated.
   weeks.forEach((week) => {
-    if (week.start > today) return;
+    const { started, earned } = evaluateKerajinanWeek(staffId, attendanceMap, week, today);
+    if (!started) return;
     weeksEvaluated += 1;
-    if (!hasAnySchedule) return;
-
-    let missedWorkDay = false;
-    for (let day = new Date(week.start); day <= week.end; day.setDate(day.getDate() + 1)) {
-      if (day > today) continue;
-      const record = attendanceMap.get(`${staffId}|${toYmd(day)}`);
-      if (record?.isWorkDay && !record.isClockedIn) {
-        missedWorkDay = true;
-        break;
-      }
-    }
-
-    if (!missedWorkDay) weeksEarned += 1;
+    if (earned) weeksEarned += 1;
   });
 
   const gajiPokok = Number(salary?.gajiPokok || 0);
@@ -5627,36 +5642,13 @@ const computeStaffPayrollForMonth = (staffId, salary, attendanceMap, weeks, mont
 // computeStaffPayrollForMonth so the preview always explains the figures in the table.
 const buildStaffAttendanceDetail = (staffId, attendanceMap, weeks, monthRange, today) => {
   const DAY_NAMES = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
-  let hasAnySchedule = false;
-  for (let day = new Date(monthRange.start); day <= monthRange.end; day.setDate(day.getDate() + 1)) {
-    if (attendanceMap.get(`${staffId}|${toYmd(day)}`)?.hasSchedule) hasAnySchedule = true;
-  }
 
   return weeks.map((week) => {
     const days = [];
-    let missedWorkDay = false;
 
     for (let day = new Date(week.start); day <= week.end; day.setDate(day.getDate() + 1)) {
       const record = attendanceMap.get(`${staffId}|${toYmd(day)}`);
-      let status = 'No schedule';
-      let tone = 'muted';
-
-      if (day > today) {
-        status = 'Belum';
-      } else if (record?.isWorkDay && record.isClockedIn) {
-        status = 'Hadir';
-        tone = 'good';
-      } else if (record?.isWorkDay) {
-        status = 'Tidak clock-in';
-        tone = 'bad';
-        missedWorkDay = true;
-      } else if (record?.isLeave) {
-        status = 'Leave';
-        tone = 'info';
-      } else if (record?.hasSchedule) {
-        status = 'Off';
-        tone = 'info';
-      }
+      const { status, tone } = classifyKerajinanDay(record, day, today);
 
       days.push({
         dateKey: toYmd(day),
@@ -5671,13 +5663,13 @@ const buildStaffAttendanceDetail = (staffId, attendanceMap, weeks, monthRange, t
       });
     }
 
-    const started = week.start <= today;
+    const { started, earned } = evaluateKerajinanWeek(staffId, attendanceMap, week, today);
     return {
       label: week.label,
       range: `${week.start.getDate()}-${week.end.getDate()}`,
       days,
       started,
-      earned: started && hasAnySchedule && !missedWorkDay,
+      earned,
       presentCount: days.filter((item) => item.status === 'Hadir').length,
     };
   });
@@ -6269,7 +6261,7 @@ function HRISView() {
         <div className="panel-head">
           <div>
             <div className="panel-title">HITUNG GAJI (PAYROLL)</div>
-            <div className="panel-subtitle mono">GAJI POKOK PENUH SETIAP BULAN • KERAJINAN PER WEEK: WEEK 1 (TGL 1-8), WEEK 2 (TGL 9-15), WEEK 3 (TGL 16-23), WEEK 4 (TGL 24-30/31) DIBAYAR JIKA CLOCK-IN DI SETIAP HARI KERJA TERJADWAL DI WEEK TSB • HARI OFF/LEAVE DIHITUNG HADIR • TIDAK CLOCK-IN DI HARI KERJA = TIDAK DAPAT KERAJINAN WEEK TSB</div>
+            <div className="panel-subtitle mono">GAJI POKOK PENUH SETIAP BULAN • KERAJINAN PER WEEK: WEEK 1 (TGL 1-8), WEEK 2 (TGL 9-15), WEEK 3 (TGL 16-23), WEEK 4 (TGL 24-30/31) DIBAYAR JIKA ADA ABSENSI MASUK & KELUAR DI SETIAP HARI (SELAIN OFF/LEAVE) DI WEEK TSB • HARI OFF/LEAVE TETAP DIHITUNG • TIDAK ADA ABSENSI SAMA SEKALI DI WEEK TSB = TIDAK DAPAT KERAJINAN</div>
           </div>
           <div className="panel-meta">{filteredPayrollRows.length ? `${formatRupiah(totalPayrollForPeriod)} TOTAL` : ''}</div>
         </div>
@@ -6464,7 +6456,7 @@ function HRISView() {
               ))}
               {!attendanceDetail.loading && !attendanceDetail.error && attendanceDetail.weeks.some((week) => week.days.length) ? (
                 <div className="finance-empty mono">
-                  Hari off / leave dihitung hadir. Hari kerja tanpa clock-in = tidak dapat uang kerajinan di week tersebut.
+                  Yang dicek hanya absensi masuk & keluar. Hari off / leave tetap dihitung. Hari tanpa clock-in + clock-out, atau week tanpa absensi sama sekali = tidak dapat uang kerajinan di week tersebut.
                   {attendanceDetail.weeks.some((week) => week.days.some((day) => day.status === 'Hadir')) ? '' : ' Tidak ada data clock-in untuk bulan ini.'}
                 </div>
               ) : null}
